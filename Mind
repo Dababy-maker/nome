@@ -1,0 +1,2126 @@
+local RYZA = {}
+RYZA.__index = RYZA
+
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local Players = game:GetService("Players")
+local CoreGui = game:GetService("CoreGui")
+local TextChatService = game:GetService("TextChatService")
+local HttpService = game:GetService("HttpService")
+local SetClipboard = setclipboard or toclipboard or (function() end)
+
+local function GetGuiParent()
+    if RunService:IsStudio() then
+        return Players.LocalPlayer:WaitForChild("PlayerGui")
+    else
+        return CoreGui
+    end
+end
+
+local function urlEncode(str)
+    if str then
+        str = string.gsub(str, "\n", "\r\n")
+        str = string.gsub(str, "([^%w %-%_%.%~])", function(c) 
+            return string.format("%%%02X", string.byte(c)) 
+        end)
+        str = string.gsub(str, " ", "%%20")
+    end
+    return str
+end
+
+RYZA.CurrentLanguage = "English"
+RYZA.Translations = {
+    English = {
+        ["Settings"] = "Settings", ["Visuals"] = "Visuals", ["Theme"] = "Theme",
+        ["Background"] = "Background", ["Transparency"] = "Transparency",
+        ["Opaque Mode"] = "Opaque Mode", ["Reset All"] = "Reset All",
+        ["General"] = "General", ["Language"] = "Language",
+        ["Language Changed"] = "Language Changed", ["Config"] = "Config",
+        ["Settings Reset"] = "Settings Reset", ["Status"] = "Status",
+        ["Are you sure?"] = "Are you sure?", ["Yes"] = "Yes", ["No"] = "No",
+        ["Toggle"] = "Toggle", ["Dropdown"] = "Dropdown", ["Slider"] = "Slider",
+        ["Color"] = "Color", ["Apply"] = "Apply", ["Reset"] = "Reset",
+        ["discord.gg/ryza: TB3 (Beta Script)"] = "discord.gg/ryza: TB3 (Beta Script)"
+    },
+    Spanish = {
+        ["Settings"] = "Ajustes", ["Visuals"] = "Visuales", ["Theme"] = "Tema",
+        ["Background"] = "Fondo", ["Transparency"] = "Transparencia",
+        ["Opaque Mode"] = "Modo Opaco", ["Reset All"] = "Restablecer Todo",
+        ["General"] = "General", ["Language"] = "Idioma",
+        ["Language Changed"] = "Idioma Cambiado", ["Config"] = "Configuración",
+        ["Settings Reset"] = "Ajustes Restablecidos", ["Status"] = "Estado",
+        ["Are you sure?"] = "¿Estás seguro?", ["Yes"] = "Sí", ["No"] = "No",
+        ["Toggle"] = "Alternar", ["Dropdown"] = "Desplegable", ["Slider"] = "Deslizador",
+        ["Color"] = "Color", ["Apply"] = "Aplicar", ["Reset"] = "Restablecer",
+        ["discord.gg/ryza: TB3 (Beta Script)"] = "discord.gg/ryza: TB3 (Beta Script)"
+    }
+}
+
+local function registerLocal(windowRef, element, key, prop)
+    prop = prop or "Text"
+    if not windowRef then return end
+    if not windowRef.LocalizedElements then windowRef.LocalizedElements = {} end
+    
+    table.insert(windowRef.LocalizedElements, {Element = element, Key = key, Property = prop})
+    
+    local lang = windowRef.CurrentLanguage or "English"
+    if RYZA.Translations[lang] and RYZA.Translations[lang][key] then
+        element[prop] = RYZA.Translations[lang][key]
+    else
+        element[prop] = key
+    end
+end
+
+-- Default built-in palettes
+RYZA.Themes = {
+    ["Electric Purple"] = Color3.fromRGB(200, 50, 255),
+    ["Neon Cyan"] = Color3.fromRGB(0, 245, 255),
+    ["Hot Pink"] = Color3.fromRGB(255, 20, 147),
+    ["Vibrant Lime"] = Color3.fromRGB(57, 255, 20),
+    ["Sunset Orange"] = Color3.fromRGB(255, 100, 0),
+    ["Electric Blue"] = Color3.fromRGB(0, 128, 255),
+    ["Plasma Yellow"] = Color3.fromRGB(255, 220, 0),
+    ["Crimson Red"] = Color3.fromRGB(255, 0, 50),
+    ["Bubblegum"] = Color3.fromRGB(255, 105, 180),
+    ["Matrix Teal"] = Color3.fromRGB(0, 250, 154),
+    ["Amber Gold"] = Color3.fromRGB(255, 175, 0),
+    ["Ice White"] = Color3.fromRGB(240, 248, 255)
+}
+
+-- Default built-in backgrounds
+RYZA.Backgrounds = {
+    ["None"] = "",
+    ["RYZA"] = "rbxassetid://135080202124876",
+    ["Car"] = "rbxassetid://139507657150817",
+    ["SpiderMan"] = "rbxassetid://84775657639976",
+    ["Money"] = "rbxassetid://119063247078615",
+    ["SpiderVerse"] = "rbxassetid://124814117116705",
+    ["Sunset"] = "rbxassetid://102530833863068",
+    ["Bikinibottom"] = "rbxassetid://96243903298655",
+    ["CrustyCrab"] = "rbxassetid://117422674720187"
+}
+
+function RYZA:AddTheme(name, color3)
+    RYZA.Themes[name] = color3
+    if self and self.themeDropdown then
+        local names = {}
+        for n in pairs(RYZA.Themes) do table.insert(names, n) end
+        table.sort(names)
+        self.themeDropdown:Update(names)
+    end
+end
+
+function RYZA:AddBackground(name, assetId)
+    if not string.find(assetId, "rbxassetid://") then
+        assetId = "rbxassetid://" .. assetId
+    end
+    RYZA.Backgrounds[name] = assetId
+    if self and self.bgDropdown then
+        local names = {"None"}
+        local temp = {}
+        for n in pairs(RYZA.Backgrounds) do if n ~= "None" then table.insert(temp, n) end end
+        table.sort(temp)
+        for _, n in ipairs(temp) do table.insert(names, n) end
+        self.bgDropdown:Update(names)
+    end
+end
+
+local BORDER_COLOR = Color3.fromRGB(0, 0, 0)
+local ROTATION_SPEED = 90
+local TOGGLE_KEY = Enum.KeyCode.K
+
+local function create(instanceType, properties)
+    local element = Instance.new(instanceType)
+    for prop, value in pairs(properties or {}) do
+        element[prop] = value
+    end
+    return element
+end
+
+local NotificationContainer, NotificationTemplate
+
+local function InitializeNotificationUI()
+    local parent = GetGuiParent()
+    if parent:FindFirstChild("RYZANotificationContainer") then
+        parent.RYZANotificationContainer:Destroy()
+    end
+
+    NotificationContainer = create("ScreenGui", {
+        Name = "RYZANotificationContainer",
+        ResetOnSpawn = false,
+        ZIndexBehavior = Enum.ZIndexBehavior.Global,
+        DisplayOrder = 10000,
+        Parent = parent
+    })
+    
+    local containerFrame = create("Frame", {
+        Name = "ContainerFrame",
+        Parent = NotificationContainer,
+        Position = UDim2.new(1, -20, 1, -20), 
+        AnchorPoint = Vector2.new(1, 1),            
+        Size = UDim2.fromOffset(250, 600),        
+        BackgroundTransparency = 1
+    })
+
+    create("UIListLayout", {
+        Parent = containerFrame,
+        FillDirection = Enum.FillDirection.Vertical,
+        HorizontalAlignment = Enum.HorizontalAlignment.Right, 
+        VerticalAlignment = Enum.VerticalAlignment.Bottom,
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 5)
+    })
+    
+    NotificationContainer = containerFrame
+
+    if not NotificationTemplate then
+        NotificationTemplate = create("Frame", {
+            Name = "NotificationTemplate",
+            Size = UDim2.fromScale(1, 1),
+            BackgroundColor3 = Color3.fromRGB(18, 18, 20),
+            BackgroundTransparency = 0.15,
+            BorderSizePixel = 0
+        })
+        create("UICorner", { CornerRadius = UDim.new(0, 8), Parent = NotificationTemplate })
+        
+        create("TextLabel", {
+            Parent = NotificationTemplate, Name = "Title", Size = UDim2.new(1, -10, 0, 22), Position = UDim2.new(0.5, 0, 0, 4), AnchorPoint = Vector2.new(0.5, 0), BackgroundTransparency = 1, Font = Enum.Font.SourceSansBold, TextColor3 = Color3.new(1, 1, 1), TextSize = 15
+        })
+        
+        create("TextLabel", {
+            Parent = NotificationTemplate, Name = "Content", Size = UDim2.new(1, -10, 0, 25), Position = UDim2.new(0.5, 0, 1, -4), AnchorPoint = Vector2.new(0.5, 1), BackgroundTransparency = 1, Font = Enum.Font.SourceSansBold, TextColor3 = Color3.new(1, 1, 1), TextSize = 13, TextWrapped = true
+        })
+    end
+end
+
+function RYZA.CreateNotification(titleText, contentText, duration)
+    if not NotificationContainer or not NotificationContainer.Parent then
+        InitializeNotificationUI()
+    end
+    duration = duration or 5
+    
+    local holder = create("Frame", {
+        Name = "NotifHolder",
+        Parent = NotificationContainer,
+        Size = UDim2.fromOffset(220, 55),
+        BackgroundTransparency = 1,
+        LayoutOrder = -tick(),
+        ClipsDescendants = false
+    })
+
+    local notifClone = NotificationTemplate:Clone()
+    
+    local lang = RYZA.CurrentLanguage or "English"
+    notifClone.Title.Text = RYZA.Translations[lang] and RYZA.Translations[lang][titleText] or titleText
+    notifClone.Content.Text = RYZA.Translations[lang] and RYZA.Translations[lang][contentText] or contentText
+    
+    notifClone.Parent = holder
+    
+    notifClone.Position = UDim2.new(1.5, 0, 0, 0) 
+    TweenService:Create(notifClone, TweenInfo.new(0.5, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+        Position = UDim2.new(0, 0, 0, 0)
+    }):Play()
+
+    task.spawn(function()
+        task.wait(duration)
+        local tweenOut = TweenService:Create(notifClone, TweenInfo.new(0.5, Enum.EasingStyle.Quint, Enum.EasingDirection.In), {
+            Position = UDim2.new(1.5, 0, 0, 0)
+        })
+        tweenOut:Play()
+        tweenOut.Completed:Wait()
+        holder:Destroy()
+    end)
+end
+
+local function CreateSection(self, options, sectionHeight)
+    options = options or {}
+    local text = options.Text or "Section"
+    local windowRef = self.window or self
+    
+    local SECTION_WIDTH = 191 
+    local SECTION_HEIGHT = sectionHeight or 180
+    local GAP = 5  
+    
+    local START_Y = 2 
+    local LEFT_X = 0        
+    local RIGHT_X = 197 
+
+    local targetParent = options.Parent or self.page
+    
+    local side = options.Side
+    if type(side) == "string" then side = side:lower() end
+    if side ~= "left" and side ~= "right" then side = "left" end
+
+    if not self.SectionCursors then
+        self.SectionCursors = {
+            ["left"] = START_Y,
+            ["right"] = START_Y
+        }
+    end
+
+    local currentY = self.SectionCursors[side]
+    local currentX = (side == "left") and LEFT_X or RIGHT_X
+    
+    local finalPosition = options.Position
+    if not finalPosition then
+        finalPosition = UDim2.new(0, currentX, 0, currentY)
+        self.SectionCursors[side] = currentY + SECTION_HEIGHT + GAP
+        local maxCursor = math.max(self.SectionCursors["left"], self.SectionCursors["right"])
+        self.MaxSectionHeight = maxCursor + 20
+        if self.window and self.window.activeTab == self.activeTabButton then
+            self.window.ContentContainer.CanvasSize = UDim2.fromOffset(0, self.MaxSectionHeight)
+        end
+    end
+
+    local finalSize = UDim2.fromOffset(SECTION_WIDTH, SECTION_HEIGHT)
+
+    local sectionFrame = create("ScrollingFrame", {
+        Name = "Section_" .. side,
+        Size = finalSize, 
+        Position = finalPosition, 
+        BackgroundColor3 = Color3.fromRGB(35, 35, 35),
+        BackgroundTransparency = 0.5,
+        BorderSizePixel = 0,
+        ScrollBarThickness = 2,
+        ScrollBarImageTransparency = 0.5,
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+        ClipsDescendants = true,
+        Parent = targetParent
+    })
+    
+    create("UICorner", { CornerRadius = UDim.new(0, 8), Parent = sectionFrame })
+    
+    local themeCol = Color3.fromRGB(200, 50, 255) 
+    if windowRef and windowRef.CurrentThemeColor then
+        themeCol = windowRef.CurrentThemeColor
+    end
+
+    local stroke = create("UIStroke", { Color = themeCol, Thickness = 2, Parent = sectionFrame })
+    if windowRef and windowRef.staticThemeElements then
+        table.insert(windowRef.staticThemeElements, {Object = stroke, Property = "Color"})
+    end
+    
+    create("UIListLayout", {
+        Parent = sectionFrame,
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 3),
+        HorizontalAlignment = Enum.HorizontalAlignment.Center
+    })
+    
+    create("UIPadding", {
+        Parent = sectionFrame,
+        PaddingTop = UDim.new(0, 8),
+        PaddingBottom = UDim.new(0, 8),
+        PaddingLeft = UDim.new(0, 6),
+        PaddingRight = UDim.new(0, 6)
+    })
+    
+    local secLabel = create("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 20),
+        BackgroundTransparency = 1,
+        TextColor3 = Color3.new(1,1,1),
+        Font = Enum.Font.SourceSansBold,
+        TextSize = 14,
+        Parent = sectionFrame
+    })
+    registerLocal(windowRef, secLabel, text)
+
+    local SectionAPI = {}
+
+    function SectionAPI:AddDualButtons(arg1, arg2)
+        local btn1Data, btn2Data
+        if type(arg1) == "table" and arg1[1] and arg1[2] then
+            btn1Data = arg1[1]
+            btn2Data = arg1[2]
+        else
+            btn1Data = arg1
+            btn2Data = arg2
+        end
+
+        local container = create("Frame", {
+            Name = "DualButtonsRow",
+            Size = UDim2.new(1, 0, 0, 22),
+            BackgroundTransparency = 1,
+            Parent = sectionFrame
+        })
+        
+        local function createPositionedButton(buttonData, side)
+            if not buttonData then return end 
+
+            local btnText = (type(buttonData) == "string") and buttonData or (buttonData.Text or "Button")
+            local callback = (type(buttonData) == "table") and buttonData.Callback or function() end
+            
+            local baseColor = Color3.fromRGB(65, 65, 65)
+            
+            local position, anchor
+            if side == "Left" then
+                position = UDim2.new(0, 0, 0, 0)
+                anchor = Vector2.new(0, 0)
+            else
+                position = UDim2.new(1, 0, 0, 0)
+                anchor = Vector2.new(1, 0)
+            end
+            
+            local size = UDim2.new(0.5, -3, 1, 0)
+
+            local btn = create("TextButton", {
+                Size = size,
+                Position = position,
+                AnchorPoint = anchor,
+                BackgroundColor3 = baseColor,
+                TextColor3 = Color3.fromRGB(225, 225, 225),
+                Font = Enum.Font.SourceSansBold,
+                TextSize = 12,
+                Parent = container
+            })
+            registerLocal(windowRef, btn, btnText)
+            
+            if windowRef and windowRef.themeableBackgrounds then
+                table.insert(windowRef.themeableBackgrounds, {Object = btn, BaseColor = baseColor})
+            end
+            
+            create("UICorner", { CornerRadius = UDim.new(0.5, 0), Parent = btn })
+            
+            local btnStroke = create("UIStroke", {
+                Color = Color3.new(1, 1, 1),
+                Thickness = 2,
+                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+                Parent = btn
+            })
+            
+            local btnGrad = create("UIGradient", {
+                Color = ColorSequence.new({
+                    ColorSequenceKeypoint.new(0.00, BORDER_COLOR), ColorSequenceKeypoint.new(0.30, BORDER_COLOR),
+                    ColorSequenceKeypoint.new(0.50, windowRef.CurrentThemeColor or themeCol), ColorSequenceKeypoint.new(0.70, BORDER_COLOR),
+                    ColorSequenceKeypoint.new(1.00, BORDER_COLOR)
+                }),
+                Rotation = 0,
+                Parent = btnStroke
+            })
+            
+            if windowRef and windowRef.animatedGradients then
+                table.insert(windowRef.animatedGradients, btnGrad)
+            end
+            
+            btn.MouseButton1Click:Connect(callback)
+        end
+
+        createPositionedButton(btn1Data, "Left")
+        createPositionedButton(btn2Data, "Right")
+    end
+
+    function SectionAPI:AddSlider(options)
+        options = options or {}
+        local sliderText = options.Text or "Slider"
+        local min = options.Min or 0
+        local max = options.Max or 100
+        local default = options.Default or min
+        local callback = options.Callback or function() end
+
+        local baseColor = Color3.fromRGB(65, 65, 65)
+        local sliderFrame = create("Frame", {
+            Name = sliderText .. "_SmallSlider",
+            Size = UDim2.new(1, 0, 0, 35),
+            BackgroundColor3 = baseColor,
+            Parent = sectionFrame
+        })
+
+        if windowRef and windowRef.themeableBackgrounds then
+            table.insert(windowRef.themeableBackgrounds, {Object = sliderFrame, BaseColor = baseColor})
+        end
+
+        create("UICorner", { CornerRadius = UDim.new(0.5, 0), Parent = sliderFrame })
+        
+        local sliderStroke = create("UIStroke", { Color = Color3.new(1, 1, 1), Thickness = 2, Parent = sliderFrame })
+        local sliderGradient = create("UIGradient", {
+            Color = ColorSequence.new({
+                ColorSequenceKeypoint.new(0.00, BORDER_COLOR), ColorSequenceKeypoint.new(0.30, BORDER_COLOR),
+                ColorSequenceKeypoint.new(0.50, windowRef.CurrentThemeColor or themeCol), ColorSequenceKeypoint.new(0.70, BORDER_COLOR),
+                ColorSequenceKeypoint.new(1.00, BORDER_COLOR)
+            }),
+            Rotation = 0, Parent = sliderStroke
+        })
+
+        if windowRef and windowRef.animatedGradients then 
+            table.insert(windowRef.animatedGradients, sliderGradient) 
+        end
+
+        local state = create("NumberValue", { Name = "State", Value = default, Parent = sliderFrame })
+
+        local label = create("TextLabel", {
+            Name = "Label", Position = UDim2.new(0, 10, 0, 2), Size = UDim2.new(1, -20, 0, 15),
+            BackgroundTransparency = 1, Font = Enum.Font.SourceSansBold,
+            TextColor3 = Color3.fromRGB(225, 225, 225), TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, Parent = sliderFrame
+        })
+        registerLocal(windowRef, label, sliderText)
+
+        local valueLabel = create("TextBox", {
+            Name = "Value", Position = UDim2.new(0, 10, 0, 2), Size = UDim2.new(1, -28, 0, 15),
+            BackgroundTransparency = 1, Font = Enum.Font.SourceSansBold, Text = tostring(default),
+            TextColor3 = Color3.fromRGB(200, 200, 200), TextSize = 13, TextXAlignment = Enum.TextXAlignment.Right, 
+            ClearTextOnFocus = false, Parent = sliderFrame
+        })
+
+        local track = create("Frame", {
+            Name = "Track", Position = UDim2.new(0, 10, 0, 20), Size = UDim2.new(1, -20, 0, 6),
+            BackgroundColor3 = Color3.fromRGB(45, 45, 45), Parent = sliderFrame
+        })
+        create("UICorner", { CornerRadius = UDim.new(0.5, 0), Parent = track })
+        create("UIStroke", { Color = BORDER_COLOR, Thickness = 1.5, Parent = track })
+
+        local range = max - min
+        if range == 0 then range = 1 end
+
+        local fill = create("Frame", { Name = "Fill", Size = UDim2.new((default - min) / range, 0, 1, 0), BackgroundColor3 = windowRef.CurrentThemeColor or themeCol, Parent = track })
+        create("UICorner", { CornerRadius = UDim.new(0.5, 0), Parent = fill })
+        
+        if windowRef and windowRef.staticThemeElements then
+            table.insert(windowRef.staticThemeElements, {Object = fill, Property = "BackgroundColor3"})
+        end
+
+        local knob = create("Frame", { Name = "Knob", Size = UDim2.fromOffset(10, 10), Position = UDim2.new((default - min) / range, 0, 0.5, 0), AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = Color3.fromRGB(225, 225, 225), Parent = track, ZIndex = 2 })
+        create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = knob })
+
+        local function updateSlider(inputObject)
+            local x = math.clamp(inputObject.Position.X - track.AbsolutePosition.X, 0, track.AbsoluteSize.X)
+            local percent = x / track.AbsoluteSize.X
+            local value = math.floor((min + (max - min) * percent) + 0.5)
+            state.Value = value
+            valueLabel.Text = tostring(value)
+            
+            fill:TweenSize(UDim2.new(percent, 0, 1, 0), Enum.EasingDirection.Out, Enum.EasingStyle.Sine, 0.05, true)
+            knob:TweenPosition(UDim2.new(percent, 0, 0.5, 0), Enum.EasingDirection.Out, Enum.EasingStyle.Sine, 0.05, true)
+            
+            if callback then callback(value) end
+        end
+
+        valueLabel.FocusLost:Connect(function()
+            local num = tonumber(valueLabel.Text)
+            if num then
+                local clamped = math.clamp(math.floor(num + 0.5), min, max)
+                local percent = (clamped - min) / range
+                state.Value = clamped
+                valueLabel.Text = tostring(clamped)
+                
+                fill:TweenSize(UDim2.new(percent, 0, 1, 0), Enum.EasingDirection.Out, Enum.EasingStyle.Sine, 0.05, true)
+                knob:TweenPosition(UDim2.new(percent, 0, 0.5, 0), Enum.EasingDirection.Out, Enum.EasingStyle.Sine, 0.05, true)
+                
+                if callback then callback(clamped) end
+            else
+                valueLabel.Text = tostring(state.Value)
+            end
+        end)
+
+        local interactionFrame = create("TextButton", { BackgroundTransparency = 1, Text = "", Size = UDim2.new(1, 10, 1, 10), Position = UDim2.new(0, -5, 0, -5), Parent = track })
+
+        interactionFrame.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                local inputChanged, inputEnded
+                updateSlider(input)
+                inputChanged = UserInputService.InputChanged:Connect(function(io)
+                    if io.UserInputType == Enum.UserInputType.MouseMovement or io.UserInputType == Enum.UserInputType.Touch then updateSlider(io) end
+                end)
+                inputEnded = UserInputService.InputEnded:Connect(function(io)
+                    if io.UserInputType == Enum.UserInputType.MouseButton1 or io.UserInputType == Enum.UserInputType.Touch then
+                        inputChanged:Disconnect(); inputEnded:Disconnect()
+                    end
+                end)
+            end
+        end)
+
+        return sliderFrame
+    end
+
+    function SectionAPI:AddButton(btnText, callback)
+        local baseColor = Color3.fromRGB(65, 65, 65)
+        local button = create("TextButton", {
+            Size = UDim2.new(1, 0, 0, 22), BackgroundColor3 = baseColor,
+            TextColor3 = Color3.fromRGB(225, 225, 225), Font = Enum.Font.SourceSansBold, TextSize = 13,
+            TextXAlignment = Enum.TextXAlignment.Left, Parent = sectionFrame
+        })
+        registerLocal(windowRef, button, btnText)
+        
+        if windowRef and windowRef.themeableBackgrounds then table.insert(windowRef.themeableBackgrounds, {Object = button, BaseColor = baseColor}) end
+        create("UICorner", { CornerRadius = UDim.new(0.5, 0), Parent = button })
+        create("UIPadding", { PaddingLeft = UDim.new(0, 10), Parent = button }) 
+        
+        local buttonStroke = create("UIStroke", { Color = Color3.new(1, 1, 1), Thickness = 2, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = button })
+        local buttonGradient = create("UIGradient", {
+            Color = ColorSequence.new({
+                ColorSequenceKeypoint.new(0.00, BORDER_COLOR), ColorSequenceKeypoint.new(0.30, BORDER_COLOR),
+                ColorSequenceKeypoint.new(0.50, windowRef.CurrentThemeColor or themeCol), ColorSequenceKeypoint.new(0.70, BORDER_COLOR),
+                ColorSequenceKeypoint.new(1.00, BORDER_COLOR)
+            }), Rotation = 0, Parent = buttonStroke
+        })
+        
+        if windowRef and windowRef.animatedGradients then table.insert(windowRef.animatedGradients, buttonGradient) end
+        
+        create("TextLabel", {
+            Name = "ArrowLabel", Size = UDim2.new(0, 20, 1, 0), Position = UDim2.new(1, -5, 0.5, 0),
+            AnchorPoint = Vector2.new(1, 0.5), BackgroundTransparency = 1, Text = ">",
+            Font = Enum.Font.SourceSansBold, TextColor3 = Color3.fromRGB(200, 200, 200), TextSize = 16, Parent = button
+        })
+
+        button.MouseButton1Click:Connect(function() if callback then callback() end end)
+        return button
+    end
+
+    function SectionAPI:AddLabel(lblText)
+        local lbl = create("TextLabel", {
+            Size = UDim2.new(1, 0, 0, 18), BackgroundTransparency = 1,
+            TextColor3 = Color3.new(1, 1, 1), TextSize = 12, Font = Enum.Font.SourceSansBold, Parent = sectionFrame
+        })
+        registerLocal(windowRef, lbl, lblText)
+        return lbl
+    end
+
+    function SectionAPI:AddLiveStatus(options)
+        options = options or {}
+        local text = options.Text or "Status"
+        local updateFunc = options.Callback or function() return "Unknown" end
+        local pollTime = options.PollTime or 1
+        
+        local statusFrame = create("Frame", {
+            Name = text .. "_Status",
+            Size = UDim2.new(1, 0, 0, 22),
+            BackgroundColor3 = Color3.fromRGB(45, 45, 45), 
+            Parent = sectionFrame
+        })
+        create("UICorner", { CornerRadius = UDim.new(0, 6), Parent = statusFrame })
+        create("UIStroke", { Color = Color3.fromRGB(0, 0, 0), Thickness = 2, Parent = statusFrame })
+
+        if windowRef and windowRef.themeableBackgrounds then
+            table.insert(windowRef.themeableBackgrounds, {Object = statusFrame, BaseColor = Color3.fromRGB(45, 45, 45)})
+        end
+
+        local titleLbl = create("TextLabel", {
+            Name = "Title",
+            Size = UDim2.new(0.6, 0, 1, 0),
+            Position = UDim2.new(0, 10, 0, 0),
+            BackgroundTransparency = 1,
+            TextColor3 = Color3.fromRGB(225, 225, 225),
+            TextSize = 13,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            Font = Enum.Font.SourceSansBold,
+            Parent = statusFrame
+        })
+        registerLocal(windowRef, titleLbl, text)
+
+        local valueLabel = create("TextLabel", {
+            Name = "Value",
+            Text = "...",
+            Size = UDim2.new(0.4, -10, 1, 0),
+            Position = UDim2.new(1, -10, 0, 0),
+            AnchorPoint = Vector2.new(1, 0),
+            BackgroundTransparency = 1,
+            TextColor3 = Color3.fromRGB(200, 200, 200),
+            TextSize = 13,
+            TextXAlignment = Enum.TextXAlignment.Right,
+            Font = Enum.Font.SourceSansBold,
+            Parent = statusFrame
+        })
+
+        task.spawn(function()
+            while statusFrame.Parent do
+                local success, result, color = pcall(updateFunc)
+                
+                if success then
+                    valueLabel.Text = tostring(result)
+                    if color and typeof(color) == "Color3" then
+                        valueLabel.TextColor3 = color
+                    else
+                        local lowerRes = tostring(result):lower()
+                        if lowerRes == "open" or lowerRes == "true" or lowerRes == "yes" or lowerRes == "safe" then
+                            valueLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+                        elseif lowerRes == "closed" or lowerRes == "false" or lowerRes == "no" or lowerRes == "unsafe" then
+                            valueLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+                        else
+                            valueLabel.TextColor3 = Color3.fromRGB(225, 225, 225)
+                        end
+                    end
+                else
+                    warn("RYZA LiveStatus Error:", result)
+                    valueLabel.Text = "Script Error"
+                    valueLabel.TextColor3 = Color3.fromRGB(255, 50, 50)
+                end
+                task.wait(pollTime)
+            end
+        end)
+        
+        return statusFrame
+    end
+    
+    function SectionAPI:AddToggle(toggleText, callback)
+        local baseColor = Color3.fromRGB(65, 65, 65)
+        local toggleFrame = create("Frame", { Name = toggleText .. "_Toggle", Size = UDim2.new(1, 0, 0, 22), BackgroundColor3 = baseColor, Parent = sectionFrame })
+        if windowRef then table.insert(windowRef.themeableBackgrounds, {Object = toggleFrame, BaseColor = baseColor}) end
+
+        create("UICorner", { CornerRadius = UDim.new(0.5, 0), Parent = toggleFrame })
+        local toggleStroke = create("UIStroke", { Color = Color3.new(1, 1, 1), Thickness = 2, Parent = toggleFrame })
+        local toggleGradient = create("UIGradient", {
+            Color = ColorSequence.new({
+                ColorSequenceKeypoint.new(0.00, BORDER_COLOR), ColorSequenceKeypoint.new(0.30, BORDER_COLOR),
+                ColorSequenceKeypoint.new(0.50, windowRef.CurrentThemeColor or themeCol), ColorSequenceKeypoint.new(0.70, BORDER_COLOR),
+                ColorSequenceKeypoint.new(1.00, BORDER_COLOR)
+            }), Rotation = 0, Parent = toggleStroke
+        })
+        if windowRef then table.insert(windowRef.animatedGradients, toggleGradient) end
+
+        local tLabel = create("TextLabel", { Name = "Label", Size = UDim2.new(1, -45, 1, 0), Position = UDim2.fromOffset(8, 0), BackgroundTransparency = 1, Font = Enum.Font.SourceSansBold, TextColor3 = Color3.fromRGB(225, 225, 225), TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, Parent = toggleFrame })
+        registerLocal(windowRef, tLabel, toggleText or "Toggle")
+
+        local switchButton = create("TextButton", { Name = "Switch", Size = UDim2.fromOffset(30, 16), Position = UDim2.new(1, -8, 0.5, 0), AnchorPoint = Vector2.new(1, 0.5), BackgroundColor3 = Color3.fromRGB(80, 80, 80), Text = "", Parent = toggleFrame })
+        create("UICorner", { CornerRadius = UDim.new(0.5, 0), Parent = switchButton })
+        create("UIStroke", { Color = BORDER_COLOR, Thickness = 1.5, Parent = switchButton })
+
+        local switchKnob = create("Frame", { Name = "Knob", Size = UDim2.fromOffset(12, 12), Position = UDim2.fromOffset(2, 2), BackgroundColor3 = Color3.fromRGB(225, 225, 225), BorderSizePixel = 0, Parent = switchButton })
+        create("UICorner", { CornerRadius = UDim.new(0.5, 0), Parent = switchKnob })
+
+        local checkmark = create("TextLabel", { Name = "Checkmark", Size = UDim2.fromScale(1, 1), Position = UDim2.fromScale(0.5, 0.5), AnchorPoint = Vector2.new(0.5, 0.5), Font = Enum.Font.SourceSansBold, Text = "✓", TextColor3 = Color3.fromRGB(0, 0, 0), TextSize = 10, BackgroundTransparency = 1, Visible = false, Parent = switchKnob })
+
+        local state = create("BoolValue", { Name = "State", Value = false, Parent = toggleFrame })
+        switchButton.MouseButton1Click:Connect(function() state.Value = not state.Value end)
+
+        state.Changed:Connect(function(newValue)
+            local tweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+            local knobGoal, bgGoal = {}, {}
+            if newValue then
+                knobGoal.Position = UDim2.fromOffset(switchButton.AbsoluteSize.X - switchKnob.AbsoluteSize.X - 2, 2)
+                bgGoal.BackgroundColor3 = windowRef.CurrentThemeColor or themeCol
+                checkmark.Visible = true
+            else
+                knobGoal.Position = UDim2.fromOffset(2, 2)
+                bgGoal.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+                checkmark.Visible = false
+            end
+            TweenService:Create(switchKnob, tweenInfo, knobGoal):Play()
+            TweenService:Create(switchButton, tweenInfo, bgGoal):Play()
+            if callback then callback(newValue) end
+        end)
+        return toggleFrame
+    end
+
+    function SectionAPI:AddDropdown(options)
+        options = options or {}
+        local txt, items, cb = options.Text or "Dropdown", options.Options or {}, options.Callback or function() end
+        local def = items[1] or ""
+        
+        local baseColor = Color3.fromRGB(45, 45, 45)
+        local ddFrame = create("Frame", { Size = UDim2.new(1, 0, 0, 25), BackgroundColor3 = baseColor, Parent = sectionFrame, ZIndex = 2 })
+        
+        if windowRef then table.insert(windowRef.themeableBackgrounds, {Object = ddFrame, BaseColor = baseColor}) end
+        create("UICorner", { CornerRadius = UDim.new(0.5, 0), Parent = ddFrame })
+        
+        local s = create("UIStroke", { Color = Color3.new(1,1,1), Thickness = 2, Parent = ddFrame })
+        local g = create("UIGradient", {
+            Color = ColorSequence.new({
+                ColorSequenceKeypoint.new(0.00, BORDER_COLOR), ColorSequenceKeypoint.new(0.30, BORDER_COLOR),
+                ColorSequenceKeypoint.new(0.50, windowRef.CurrentThemeColor or themeCol), ColorSequenceKeypoint.new(0.70, BORDER_COLOR),
+                ColorSequenceKeypoint.new(1.00, BORDER_COLOR)
+            }),
+            Rotation = 0, Parent = s 
+        })
+        if windowRef then table.insert(windowRef.animatedGradients, g) end
+        
+        local dLabel = create("TextLabel", { Size = UDim2.new(0.45, 0, 1, 0), Position = UDim2.new(0, 10, 0, 0), BackgroundTransparency = 1, TextColor3 = Color3.fromRGB(225, 225, 225), TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, Font = Enum.Font.SourceSansBold, Parent = ddFrame })
+        registerLocal(windowRef, dLabel, txt)
+
+        local btnColor = Color3.fromRGB(65, 65, 65)
+        local btn = create("TextButton", { 
+            Size = UDim2.new(0.5, -10, 1, -4), Position = UDim2.new(1, -6, 0.5, 0), AnchorPoint = Vector2.new(1, 0.5), 
+            BackgroundColor3 = btnColor, TextColor3 = Color3.fromRGB(225, 225, 225), 
+            TextSize = 11, TextTruncate = Enum.TextTruncate.AtEnd, Font = Enum.Font.SourceSansBold, 
+            TextXAlignment = Enum.TextXAlignment.Center, Parent = ddFrame 
+        })
+        registerLocal(windowRef, btn, def)
+        create("UIPadding", { PaddingRight = UDim.new(0, 6), PaddingLeft = UDim.new(0, 6), Parent = btn })
+
+        if windowRef then table.insert(windowRef.themeableBackgrounds, {Object = btn, BaseColor = btnColor}) end
+        create("UICorner", { CornerRadius = UDim.new(0.5, 0), Parent = btn })
+
+        local list = create("ScrollingFrame", { 
+            Size = UDim2.new(0, 100, 0, 100), 
+            BackgroundColor3 = Color3.fromRGB(20, 20, 20),
+            BackgroundTransparency = 0.25,
+            Visible = false, 
+            Parent = windowRef.ScreenGui, 
+            ZIndex = 10000, 
+            BorderSizePixel = 0, 
+            ScrollBarThickness = 4,
+            ScrollBarImageTransparency = 0.5 
+        })
+        create("UICorner", { CornerRadius = UDim.new(0, 8), Parent = list })
+        create("UIStroke", { Color = windowRef.CurrentThemeColor or themeCol, Thickness = 1, Parent = list })
+        if windowRef then table.insert(windowRef.staticThemeElements, {Object = list:FindFirstChildOfClass("UIStroke"), Property = "Color"}) end
+        
+        create("UIListLayout", { Parent = list, SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 2) })
+        
+        local open = false
+        
+        local function close() 
+            open = false 
+            list.Visible = false 
+        end
+        if windowRef.openedPopups then table.insert(windowRef.openedPopups, {close = close, isColorPicker = false}) end
+        
+        local state = create("StringValue", {Name="State", Value=def, Parent=ddFrame})
+        
+        btn.MouseButton1Click:Connect(function()
+            open = not open
+            if open then
+                for _, p in pairs(windowRef.openedPopups) do if p.close ~= close then p.close() end end
+                local cnt = #items
+                local itemH = 25
+                local totalH = (cnt * itemH) + ((cnt-1)*2)
+                local displayH = math.min(150, totalH)
+            
+                list.CanvasSize = UDim2.fromOffset(0, totalH)
+                list.Size = UDim2.fromOffset(ddFrame.AbsoluteSize.X, displayH)
+                list.Visible = true
+            
+                local screenHeight = windowRef.ScreenGui.AbsoluteSize.Y
+                local function up() 
+                    if not btn.Parent or not ddFrame.Visible or not ddFrame:IsDescendantOf(game) then close() return end
+                
+                    local frameAbs = ddFrame.AbsolutePosition
+                    local distBottom = screenHeight - (frameAbs.Y + ddFrame.AbsoluteSize.Y)
+                
+                    if distBottom < displayH then
+                        list.Position = UDim2.fromOffset(frameAbs.X, frameAbs.Y - displayH - 2) 
+                    else
+                        list.Position = UDim2.fromOffset(frameAbs.X, frameAbs.Y + ddFrame.AbsoluteSize.Y + 2) 
+                    end
+                end
+                up()
+            else close() end
+        end)
+        
+        local function addOpt(v)
+            local optBtn = create("TextButton", { Size = UDim2.new(1, -4, 0, 25), BackgroundTransparency = 1, TextColor3 = Color3.fromRGB(225, 225, 225), TextXAlignment = Enum.TextXAlignment.Left, Font = Enum.Font.SourceSansBold, TextSize = 12, Parent = list, ZIndex = 10001 })
+            registerLocal(windowRef, optBtn, v)
+            
+            create("UIPadding", {PaddingLeft = UDim.new(0, 8), Parent = optBtn})
+            optBtn.MouseEnter:Connect(function() optBtn.BackgroundTransparency = 0.5; optBtn.BackgroundColor3 = Color3.fromRGB(80,80,80) end)
+            optBtn.MouseLeave:Connect(function() optBtn.BackgroundTransparency = 1 end)
+            
+            optBtn.MouseButton1Click:Connect(function() 
+                state.Value = v
+                registerLocal(windowRef, btn, v)
+                cb(v)
+                close() 
+            end)
+        end
+        for _, v in ipairs(items) do addOpt(v) end
+        
+        ddFrame.Destroying:Connect(function() list:Destroy() end)
+        
+        local api = { Frame = ddFrame, State = state }
+        function api:Update(newItems)
+            items = newItems or {}
+            for _, c in pairs(list:GetChildren()) do if c:IsA("TextButton") then c:Destroy() end end
+            for _, v in ipairs(items) do addOpt(v) end
+            
+            if #items > 0 and not table.find(items, state.Value) then
+                state.Value = items[1]
+                registerLocal(windowRef, btn, items[1])
+                cb(items[1]) 
+            end
+        end
+        return api
+    end
+
+    function SectionAPI:AddPlayerDropdown(options)
+        options = options or {}
+        options.Options = {}
+        
+        local dd = SectionAPI:AddDropdown(options)
+        
+        local function upd()
+            local p = {}
+            for _, v in pairs(Players:GetPlayers()) do table.insert(p, v.Name) end
+            table.sort(p)
+            dd:Update(p)
+        end
+        
+        upd()
+        local c1 = Players.PlayerAdded:Connect(upd)
+        local c2 = Players.PlayerRemoving:Connect(upd)
+        dd.Frame.Destroying:Connect(function() c1:Disconnect(); c2:Disconnect() end)
+        
+        return dd
+    end
+
+    function SectionAPI:AddColorPicker(options)
+        options = options or {}
+        local txt = options.Text or "Color"
+        local def = options.Default or Color3.new(1,1,1)
+        local cb = options.Callback or function() end
+        
+        local collapsedHeight = 26
+        local expandedHeight = 215
+        
+        local pf = create("Frame", { 
+            Size = UDim2.new(1, 0, 0, collapsedHeight), 
+            BackgroundColor3 = Color3.fromRGB(45, 45, 45), 
+            Parent = sectionFrame,
+            ClipsDescendants = false,
+            ZIndex = 5
+        })
+        if windowRef then table.insert(windowRef.themeableBackgrounds, {Object = pf, BaseColor = Color3.fromRGB(45, 45, 45)}) end
+        create("UICorner", { CornerRadius = UDim.new(0, 6), Parent = pf })
+        local s = create("UIStroke", { Color = Color3.new(1,1,1), Thickness = 2, Parent = pf })
+        local g = create("UIGradient", {
+            Color = ColorSequence.new({ ColorSequenceKeypoint.new(0, BORDER_COLOR), ColorSequenceKeypoint.new(0.3, BORDER_COLOR), ColorSequenceKeypoint.new(0.5, windowRef.CurrentThemeColor or themeCol), ColorSequenceKeypoint.new(0.7, BORDER_COLOR), ColorSequenceKeypoint.new(1, BORDER_COLOR) }),
+            Rotation = 0, Parent = s 
+        })
+        if windowRef then table.insert(windowRef.animatedGradients, g) end
+        
+        local cLabel = create("TextLabel", { Size = UDim2.new(0.6, 0, 0, 26), Position = UDim2.new(0, 10, 0, 0), BackgroundTransparency = 1, TextColor3 = Color3.new(0.9,0.9,0.9), TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, Font = Enum.Font.SourceSansBold, Parent = pf, ZIndex = 6 })
+        registerLocal(windowRef, cLabel, txt)
+
+        local colorPreview = create("TextButton", { Size = UDim2.new(0, 40, 0, 16), Position = UDim2.new(1, -10, 0, 5), AnchorPoint = Vector2.new(1, 0), BackgroundColor3 = def, Text = "", Parent = pf, ZIndex = 6 })
+        create("UICorner", { CornerRadius = UDim.new(0, 4), Parent = colorPreview })
+        create("UIStroke", { Color = Color3.new(1,1,1), Transparency = 0.5, Thickness = 1.5, Parent = colorPreview })
+        
+        local state = create("Color3Value", { Name = "State", Value = def, Parent = pf })
+
+        local inlineContainer = create("Frame", {
+            Name = "InlineContainer",
+            Size = UDim2.new(1, -16, 0, 180),
+            Position = UDim2.new(0, 8, 0, 30),
+            BackgroundTransparency = 1,
+            Visible = false,
+            Parent = pf,
+            ZIndex = 7
+        })
+
+        local svBox = create("Frame", { Name = "SVBox", Size = UDim2.new(1, 0, 0, 125), Position = UDim2.fromOffset(0, 5), BackgroundColor3 = Color3.fromHSV(0, 1, 1), BorderSizePixel = 0, ClipsDescendants = true, Parent = inlineContainer, ZIndex = 8 })
+        create("UICorner", { CornerRadius = UDim.new(0, 4), Parent = svBox })
+        
+        local whiteOverlay = create("Frame", { Name = "WhiteOverlay", Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0, Parent = svBox, ZIndex = 9 })
+        create("UICorner", { CornerRadius = UDim.new(0, 4), Parent = whiteOverlay })
+        create("UIGradient", { Rotation = 0, Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 1) }), Parent = whiteOverlay })
+
+        local blackOverlay = create("Frame", { Name = "BlackOverlay", Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(0, 0, 0), BorderSizePixel = 0, Parent = svBox, ZIndex = 10 })
+        create("UICorner", { CornerRadius = UDim.new(0, 4), Parent = blackOverlay })
+        create("UIGradient", { Rotation = 90, Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(1, 0) }), Parent = blackOverlay })
+        
+        local svKnob = create("Frame", { Name = "SVKnob", Size = UDim2.fromOffset(10, 10), BackgroundColor3 = Color3.new(1,1,1), BorderSizePixel = 0, Parent = svBox, ZIndex = 11 })
+        create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = svKnob })
+        create("UIStroke", { Color = Color3.new(0,0,0), Thickness = 2, Parent = svKnob })
+    
+        local hueSlider = create("Frame", { Name = "HueSlider", Size = UDim2.new(1, 0, 0, 15), Position = UDim2.new(0, 0, 0, 135), BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0, Parent = inlineContainer, ZIndex = 8 })
+        create("UICorner", { CornerRadius = UDim.new(0, 4), Parent = hueSlider })
+        local hueGradient = create("UIGradient", { Name = "HueGradient", Rotation = 0, Parent = hueSlider })
+        local hueColors = {} for i = 0, 10 do table.insert(hueColors, ColorSequenceKeypoint.new(i/10, Color3.fromHSV(i/10, 1, 1))) end
+        hueGradient.Color = ColorSequence.new(hueColors)
+        local hueKnob = create("Frame", { Name = "HueKnob", Size = UDim2.new(0, 6, 1, 4), Position = UDim2.new(0.5, 0, 0.5, 0), AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = Color3.new(1,1,1), BorderSizePixel = 0, Parent = hueSlider, ZIndex = 9 })
+        create("UICorner", { CornerRadius = UDim.new(0, 2), Parent = hueKnob })
+        create("UIStroke", { Color = Color3.new(0,0,0), Thickness = 1.5, Parent = hueKnob })
+    
+        local rgbLabel = create("TextLabel", { Name = "RGBLabel", Size = UDim2.new(1, 0, 0, 15), Position = UDim2.new(0, 0, 0, 155), BackgroundTransparency = 1, Text = "R: 255  G: 255  B: 255", Font = Enum.Font.Code, TextColor3 = Color3.fromRGB(200, 200, 200), TextSize = 10, TextXAlignment = Enum.TextXAlignment.Left, Parent = inlineContainer, ZIndex = 8 })
+    
+        local h, s, v = 0, 1, 1
+        local workingColor = def
+
+        local function updateWorkingColor()
+            workingColor = Color3.fromHSV(h, s, v)
+            svKnob.BackgroundColor3 = workingColor
+            svBox.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
+            local r = math.floor(workingColor.R * 255); local g = math.floor(workingColor.G * 255); local b = math.floor(workingColor.B * 255)
+            rgbLabel.Text = string.format("R: %d  G: %d  B: %d", r, g, b)
+            
+            state.Value = workingColor
+            colorPreview.BackgroundColor3 = workingColor
+            if cb then cb(workingColor) end
+        end
+        
+        local function setPickerToColor(col)
+            local dh, ds, dv = col:ToHSV()
+            h, s, v = dh, ds, dv
+            workingColor = col
+            local maxX = svBox.AbsoluteSize.X - 10
+            local maxY = svBox.AbsoluteSize.Y - 10
+            local xOffset = math.clamp(s * svBox.AbsoluteSize.X, 0, maxX)
+            local yOffset = math.clamp((1 - v) * svBox.AbsoluteSize.Y, 0, maxY)
+            svKnob.Position = UDim2.fromOffset(xOffset, yOffset)
+            hueKnob.Position = UDim2.fromScale(h, 0.5)
+            updateWorkingColor()
+        end
+
+        setPickerToColor(def)
+
+        local isOpen = false
+        local function togglePicker(forcedState)
+            if forcedState ~= nil then
+                isOpen = forcedState
+            else
+                isOpen = not isOpen
+            end
+
+            local extraHeight = expandedHeight - collapsedHeight
+
+            if isOpen then
+                if windowRef and windowRef.openedPopups then
+                    for _, popup in ipairs(windowRef.openedPopups) do
+                        if popup.close and not popup.isColorPicker then popup.close() end
+                    end
+                end
+                inlineContainer.Visible = true
+                pf.ZIndex = 20
+                sectionFrame.ZIndex = 15
+                
+                TweenService:Create(pf, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = UDim2.new(1, 0, 0, expandedHeight)}):Play()
+                local layout = sectionFrame:FindFirstChildOfClass("UIListLayout")
+                sectionFrame.CanvasSize = UDim2.new(0, 0, 0, (layout and layout.AbsoluteContentSize.Y or 0) + extraHeight)
+            else
+                TweenService:Create(pf, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = UDim2.new(1, 0, 0, collapsedHeight)}):Play()
+                sectionFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+                task.delay(0.2, function()
+                    if not isOpen then 
+                        inlineContainer.Visible = false 
+                        pf.ZIndex = 5
+                        sectionFrame.ZIndex = 1
+                    end
+                end)
+            end
+        end
+
+        if windowRef and windowRef.openedPopups then
+            table.insert(windowRef.openedPopups, {close = function()
+                if isOpen then togglePicker(false) end
+            end, isColorPicker = true})
+        end
+
+        local function setupInput(frame, knob, isHueSlider, callback)
+            local inputConnection
+            inputConnection = frame.InputBegan:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                    sectionFrame.ScrollingEnabled = false
+                    local changedConnection, endedConnection
+                    local function handleInput(inputObject)
+                        local pos = inputObject.Position
+                        local absPos = frame.AbsolutePosition
+                        local absSize = frame.AbsoluteSize
+                        
+                        if isHueSlider then 
+                            local x = math.clamp((pos.X - absPos.X) / absSize.X, 0, 1)
+                            callback(x)
+                            knob.Position = UDim2.fromScale(x, 0.5) 
+                        else 
+                            local maxX = math.max(0, absSize.X - knob.AbsoluteSize.X)
+                            local maxY = math.max(0, absSize.Y - knob.AbsoluteSize.Y)
+                            local xOffset = math.clamp(pos.X - absPos.X, 0, maxX)
+                            local yOffset = math.clamp(pos.Y - absPos.Y, 0, maxY)
+                            
+                            local newS = (maxX > 0) and (xOffset / maxX) or 0
+                            local newV = (maxY > 0) and (1 - (yOffset / maxY)) or 0
+                            
+                            callback(newS, newV)
+                            knob:TweenPosition(UDim2.fromOffset(xOffset, yOffset), Enum.EasingDirection.Out, Enum.EasingStyle.Sine, 0.04, true)
+                        end
+                        updateWorkingColor()
+                    end
+                    handleInput(input)
+                    changedConnection = UserInputService.InputChanged:Connect(function(inputObject) if inputObject.UserInputType == Enum.UserInputType.MouseMovement or inputObject.UserInputType == Enum.UserInputType.Touch then handleInput(inputObject) end end)
+                    endedConnection = UserInputService.InputEnded:Connect(function(inputObject) 
+                        if inputObject.UserInputType == Enum.UserInputType.MouseButton1 or inputObject.UserInputType == Enum.UserInputType.Touch then 
+                            sectionFrame.ScrollingEnabled = true
+                            if changedConnection then changedConnection:Disconnect() end
+                            if endedConnection then endedConnection:Disconnect() end 
+                        end 
+                    end)
+                end
+            end)
+            if windowRef and windowRef.connections then table.insert(windowRef.connections, inputConnection) end
+        end
+        setupInput(svBox, svKnob, false, function(newS, newV) s, v = newS, newV end)
+        setupInput(hueSlider, hueKnob, true, function(newH) h = newH end)
+
+        colorPreview.MouseButton1Click:Connect(function() togglePicker() end)
+        cLabel.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                togglePicker()
+            end
+        end)
+
+        return pf
+    end
+
+    function SectionAPI:AddTextBox(options)
+        options = options or {}
+        local txt, def, ph, cb = options.Text or "Text", options.Default or "", options.Placeholder or "etc...", options.Callback or function() end
+        local bf = create("Frame", { Size = UDim2.new(1, 0, 0, 30), BackgroundColor3 = Color3.fromRGB(65, 65, 65), Parent = sectionFrame })
+        if windowRef then table.insert(windowRef.themeableBackgrounds, {Object = bf, BaseColor = Color3.fromRGB(65, 65, 65)}) end
+        create("UICorner", { CornerRadius = UDim.new(0.5, 0), Parent = bf })
+        local s = create("UIStroke", { Color = Color3.new(1,1,1), Thickness = 2, Parent = bf })
+        local g = create("UIGradient", {
+            Color = ColorSequence.new({ ColorSequenceKeypoint.new(0, BORDER_COLOR), ColorSequenceKeypoint.new(0.3, BORDER_COLOR), ColorSequenceKeypoint.new(0.5, windowRef.CurrentThemeColor or themeCol), ColorSequenceKeypoint.new(0.7, BORDER_COLOR), ColorSequenceKeypoint.new(1, BORDER_COLOR) }),
+            Rotation = 0, Parent = s 
+        })
+        if windowRef then table.insert(windowRef.animatedGradients, g) end
+        
+        local txtLbl = create("TextLabel", { Size = UDim2.new(1, -10, 0, 12), Position = UDim2.new(0, 10, 0, 2), BackgroundTransparency = 1, TextColor3 = Color3.new(0.9,0.9,0.9), TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left, Font = Enum.Font.SourceSansBold, Parent = bf })
+        registerLocal(windowRef, txtLbl, txt)
+
+        local tb = create("TextBox", { Text = def, Size = UDim2.new(1, -16, 0, 14), Position = UDim2.new(0, 8, 0, 15), BackgroundColor3 = Color3.fromRGB(45,45,45), TextColor3 = Color3.new(1,1,1), TextSize = 11, Font = Enum.Font.SourceSansBold, Parent = bf })
+        registerLocal(windowRef, tb, ph, "PlaceholderText")
+        create("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6), Parent = tb })
+        create("UICorner", { CornerRadius = UDim.new(0.5, 0), Parent = tb })
+        tb.FocusLost:Connect(function() cb(tb.Text) end)
+    end
+
+    function SectionAPI:AddSeparator()
+        local sep = create("Frame", { Size = UDim2.new(1, 0, 0, 2), BackgroundColor3 = Color3.fromRGB(80, 80, 80), BorderSizePixel = 0, Parent = sectionFrame })
+        create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = sep })
+        local g = create("UIGradient", {
+            Color = ColorSequence.new({ ColorSequenceKeypoint.new(0, BORDER_COLOR), ColorSequenceKeypoint.new(0.3, BORDER_COLOR), ColorSequenceKeypoint.new(0.5, windowRef.CurrentThemeColor or themeCol), ColorSequenceKeypoint.new(0.7, BORDER_COLOR), ColorSequenceKeypoint.new(1, BORDER_COLOR) }),
+            Rotation = 0, Parent = sep 
+        })
+        if windowRef then table.insert(windowRef.animatedGradients, g) end
+        return sep
+    end
+
+    return SectionAPI
+end
+
+function RYZA:AddSmallSection(options)
+    return CreateSection(self, options, 180)
+end
+
+function RYZA:AddBigSection(options)
+    return CreateSection(self, options, 200)
+end
+
+function RYZA:AddTab(tabName)
+    if self.activeTab then
+        if self.window and self.window.openedPopups then
+            for _, popup in ipairs(self.window.openedPopups) do
+                popup.close()
+            end
+        end
+        local oldTabBaseColor = self.activeTab:GetAttribute("BaseColor")
+        if oldTabBaseColor then
+            local currentThemeColor = RYZA.Themes[self:GetThemeName()] or RYZA.Themes["Electric Purple"]
+            self.activeTab.BackgroundColor3 = oldTabBaseColor:Lerp(currentThemeColor, 0.15)
+        end
+    end
+
+    local baseColor = Color3.fromRGB(65, 65, 65)
+    local tabButton = create("TextButton", { Name = tabName, Size = UDim2.fromOffset(94, 28), BackgroundColor3 = baseColor, Font = Enum.Font.SourceSansBold, TextColor3 = Color3.fromRGB(225, 225, 225), TextSize = 14, Parent = self.TabContainer })
+    registerLocal(self.window or self, tabButton, tabName)
+    
+    tabButton:SetAttribute("BaseColor", baseColor)
+    table.insert(self.themeableBackgrounds, {Object = tabButton, BaseColor = baseColor})
+
+    create("UICorner", { CornerRadius = UDim.new(0.5, 0), Parent = tabButton })
+    local tabStroke = create("UIStroke", { Color = Color3.new(1, 1, 1), Thickness = 2, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = tabButton })
+    local tabGradient = create("UIGradient", {
+        Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0.00, BORDER_COLOR),
+            ColorSequenceKeypoint.new(0.30, BORDER_COLOR),
+            ColorSequenceKeypoint.new(0.50, self.CurrentThemeColor),
+            ColorSequenceKeypoint.new(0.70, BORDER_COLOR),
+            ColorSequenceKeypoint.new(1.00, BORDER_COLOR)
+        }),
+        Rotation = 0, Parent = tabStroke
+    })
+    table.insert(self.animatedGradients, tabGradient)
+
+    local contentPage = create("Frame", { Name = tabName .. "_Page", Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Parent = self.ContentContainer, Visible = false })
+    
+    local itemsContainer = create("Frame", {
+        Name = "ItemsContainer",
+        Size = UDim2.fromScale(1, 1),
+        BackgroundTransparency = 1,
+        Parent = contentPage
+    })
+    
+    local listLayout = create("UIListLayout", { Parent = itemsContainer, Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder, HorizontalAlignment = Enum.HorizontalAlignment.Left })
+    
+    local tabObject = {
+        page = contentPage,
+        ElementContainer = itemsContainer, 
+        window = self,
+        isTab = true,
+        pages = {},
+        pageStack = {},
+        tabName = tabName,
+        activeTabButton = tabButton,
+        SectionCursors = {
+            ["left"] = 2,
+            ["right"] = 2
+        },
+        MaxSectionHeight = 0
+    }
+    tabObject.rootPage = tabObject
+    setmetatable(tabObject, RYZA)
+    table.insert(tabObject.pageStack, tabObject)
+    
+    local contentPadding = self.ContentContainer:FindFirstChildOfClass("UIPadding")
+
+    listLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        if tabObject.page.Visible then
+            local h = math.max(listLayout.AbsoluteContentSize.Y, tabObject.MaxSectionHeight)
+            self.ContentContainer.CanvasSize = UDim2.fromOffset(0, h + contentPadding.PaddingTop.Offset + contentPadding.PaddingBottom.Offset)
+        end
+    end)
+    
+    if not self.activeTab then
+        contentPage.Visible = true
+        self.activeTab = tabButton
+    end
+    
+    self.pages[tabButton] = tabObject
+
+    local currentThemeName = self:GetThemeName()
+    if tabButton == self.activeTab then
+        local currentThemeColor = RYZA.Themes[currentThemeName] or RYZA.Themes["Electric Purple"]
+        tabButton.BackgroundColor3 = baseColor:Lerp(currentThemeColor, 0.35)
+    end
+
+    tabButton.MouseButton1Click:Connect(function()
+        if self.activeTab and self.activeTab ~= tabButton then
+            local winRef = self.window or self
+            if winRef.openedPopups then
+                for _, popup in ipairs(winRef.openedPopups) do
+                    popup.close()
+                end
+            end
+           
+            local oldTab = self.pages[self.activeTab]
+            if oldTab then
+                oldTab.page.Visible = false
+            end
+           
+            local oldTabBaseColor = self.activeTab:GetAttribute("BaseColor")
+            local currentThemeName = self:GetThemeName()
+            if oldTabBaseColor then
+                local currentThemeColor = RYZA.Themes[currentThemeName] or RYZA.Themes["Electric Purple"]
+                self.activeTab.BackgroundColor3 = oldTabBaseColor:Lerp(currentThemeColor, 0.15)
+            end
+        end
+
+        tabObject.page.Visible = true
+        local currentThemeName = self:GetThemeName()
+        local currentThemeColor = RYZA.Themes[currentThemeName] or RYZA.Themes["Electric Purple"]
+        tabButton.BackgroundColor3 = baseColor:Lerp(currentThemeColor, 0.35)
+        self.activeTab = tabButton
+        
+        local h = math.max(listLayout.AbsoluteContentSize.Y, tabObject.MaxSectionHeight)
+        self.ContentContainer.CanvasSize = UDim2.fromOffset(0, h + contentPadding.PaddingTop.Offset + contentPadding.PaddingBottom.Offset)
+    end)
+    return tabObject
+end
+
+function RYZA:SetLanguage(lang)
+    self.CurrentLanguage = lang
+    local langCode = (lang == "Spanish") and "es" or "en"
+    
+    if self.window and self.window.LocalizedElements then
+        for _, item in ipairs(self.window.LocalizedElements) do
+            if item.Element and item.Element.Parent then
+                if self.Translations[lang] and self.Translations[lang][item.Key] then
+                    item.Element[item.Property] = self.Translations[lang][item.Key]
+                else
+                    if lang == "English" then
+                        item.Element[item.Property] = item.Key
+                    else
+                        task.spawn(function()
+                            local requestFunc = syn and syn.request or http and http.request or http_request or fluxus and fluxus.request or getgenv().request or request
+                            if requestFunc then
+                                local url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl="..langCode.."&dt=t&q=" .. urlEncode(item.Key)
+                                local success, res = pcall(function() return requestFunc({Url = url, Method = "GET"}) end)
+                                
+                                if success and res and res.Body then
+                                    local decSuccess, decoded = pcall(function() return HttpService:JSONDecode(res.Body) end)
+                                    if decSuccess and decoded and decoded[1] and decoded[1][1] and decoded[1][1][1] then
+                                        local translatedText = decoded[1][1][1]
+                                        
+                                        if not self.Translations[lang] then self.Translations[lang] = {} end
+                                        self.Translations[lang][item.Key] = translatedText
+                                        
+                                        item.Element[item.Property] = translatedText
+                                    end
+                                end
+                            end
+                        end)
+                    end
+                end
+            end
+        end
+    end
+end
+
+function RYZA:GetThemeName()
+    return self.CurrentThemeName or "Electric Purple"
+end
+
+function RYZA:SetTheme(colorName)
+    local themeColor = RYZA.Themes[colorName]
+    if not themeColor then 
+        themeColor = RYZA.Themes["Electric Purple"] 
+    end
+
+    self.CurrentThemeName = colorName
+    self.CurrentThemeColor = themeColor
+
+    local newColorSequence = ColorSequence.new({
+        ColorSequenceKeypoint.new(0.00, BORDER_COLOR),
+        ColorSequenceKeypoint.new(0.30, BORDER_COLOR),
+        ColorSequenceKeypoint.new(0.50, themeColor),
+        ColorSequenceKeypoint.new(0.70, BORDER_COLOR),
+        ColorSequenceKeypoint.new(1.00, BORDER_COLOR)
+    })
+
+    for i = #self.animatedGradients, 1, -1 do
+        local gradient = self.animatedGradients[i]
+        if gradient and gradient.Parent then gradient.Color = newColorSequence else table.remove(self.animatedGradients, i) end
+    end
+
+    for i = #self.staticThemeElements, 1, -1 do
+        local elementInfo = self.staticThemeElements[i]
+        if elementInfo and elementInfo.Object and elementInfo.Object.Parent then elementInfo.Object[elementInfo.Property] = themeColor else table.remove(self.staticThemeElements, i) end
+    end
+
+    for i = #self.themeableBackgrounds, 1, -1 do
+        local elementInfo = self.themeableBackgrounds[i]
+        if elementInfo and elementInfo.Object and elementInfo.Object.Parent then
+            if elementInfo.Object == self.activeTab then
+                elementInfo.Object.BackgroundColor3 = elementInfo.BaseColor:Lerp(themeColor, 0.35)
+            else
+                elementInfo.Object.BackgroundColor3 = elementInfo.BaseColor:Lerp(themeColor, 0.15)
+            end
+        else
+            table.remove(self.themeableBackgrounds, i)
+        end
+    end
+end
+
+function RYZA:UpdateVisuals()
+    local tweenInfo = TweenInfo.new(0.3)
+
+    if self.isOpaque then
+        TweenService:Create(self.MainFrame, tweenInfo, {BackgroundTransparency = 0}):Play()
+        local bg = self.MainFrame:FindFirstChild("BackgroundImage")
+        if bg then TweenService:Create(bg, tweenInfo, {ImageTransparency = 0}):Play() end
+    else
+        TweenService:Create(self.MainFrame, tweenInfo, {BackgroundTransparency = self.defaultTransparency}):Play()
+        local bg = self.MainFrame:FindFirstChild("BackgroundImage")
+        if bg then TweenService:Create(bg, tweenInfo, {ImageTransparency = self.defaultTransparency}):Play() end
+    end
+end
+
+function RYZA:SetBackground(bgName)
+    self.CurrentBackground = bgName
+    local assetId = RYZA.Backgrounds[bgName] or ""
+    
+    local existingBg = self.MainFrame:FindFirstChild("BackgroundImage")
+    
+    if assetId == "" then
+        if existingBg then existingBg:Destroy() end
+    else
+        if not existingBg then
+            existingBg = create("ImageLabel", {
+                Name = "BackgroundImage",
+                Size = UDim2.fromScale(1, 1),
+                Position = UDim2.fromScale(0, 0),
+                BackgroundTransparency = 1,
+                ZIndex = 0,
+                ScaleType = Enum.ScaleType.Stretch,
+                ImageTransparency = self.isOpaque and 0 or self.defaultTransparency,
+                Parent = self.MainFrame
+            })
+            create("UICorner", { CornerRadius = UDim.new(0, 16), Parent = existingBg })
+        end
+        existingBg.Image = assetId
+    end
+end
+
+function RYZA:SetTransparency(level) 
+    self.defaultTransparency = 1 - (level / 100)
+    self:UpdateVisuals()
+end
+
+function RYZA:ResetSettings()
+    local resetTheme = self.DefaultTheme or "Electric Purple"
+    self:SetTheme(resetTheme)
+    
+    local resetTransparency = self.window.initialTransparencyValue or 75
+    self:SetTransparency(resetTransparency)
+    self.isOpaque = false
+
+    if self.themeDropdown then self.themeDropdown.State.Value = resetTheme end
+    if self.opacityToggle then self.opacityToggle.State.Value = false end
+    if self.transparencySlider then self.transparencySlider.State.Value = resetTransparency end
+    if self.bgDropdown then self.bgDropdown.State.Value = "None" end
+    if self.languageDropdown then 
+        self.languageDropdown.State.Value = "English" 
+        self:SetLanguage("English")
+    end
+    
+    self:SetBackground("None")
+end
+
+function RYZA:CreateSettingsTab(options)
+    options = options or {}
+    local settingsTab = self:AddTab("Settings")
+    
+    local visualSection = settingsTab:AddSmallSection({
+        Text = "Visuals",
+        Side = "Left"
+    })
+
+    local themeNames = {}
+    for name in pairs(RYZA.Themes) do table.insert(themeNames, name) end
+    table.sort(themeNames)
+
+    local bgNames = {"None"}
+    local tempBgs = {}
+    for name in pairs(RYZA.Backgrounds) do if name ~= "None" then table.insert(tempBgs, name) end end
+    table.sort(tempBgs)
+    for _, name in ipairs(tempBgs) do table.insert(bgNames, name) end
+
+    self.themeDropdown = visualSection:AddDropdown({
+        Text = "Theme",
+        Options = themeNames,
+        Callback = function(v) self:SetTheme(v) end
+    })
+
+    self.bgDropdown = visualSection:AddDropdown({
+        Text = "Background",
+        Options = bgNames,
+        Default = "None",
+        Callback = function(v) self:SetBackground(v) end
+    })
+
+    self.transparencySlider = visualSection:AddSlider({
+        Text = "Transparency", Min = 0, Max = 100, Default = 75,
+        Callback = function(v) self:SetTransparency(v) end
+    })
+
+    self.opacityToggle = visualSection:AddToggle("Opaque Mode", function(v)
+        self.isOpaque = v
+        self:UpdateVisuals()
+    end)
+    
+    visualSection:AddButton("Reset All", function()
+        self:ResetSettings()
+        RYZA.CreateNotification("Config", "Settings Reset", 2)
+    end)
+
+    local generalSection = settingsTab:AddSmallSection({
+        Text = "General",
+        Side = "Right"
+    })
+
+    self.languageDropdown = generalSection:AddDropdown({
+        Text = "Language",
+        Options = {"English", "Spanish"},
+        Default = "English",
+        Callback = function(v)
+            self:SetLanguage(v)
+            RYZA.CreateNotification("Language Changed", "Set to " .. v, 3)
+        end
+    })
+
+    generalSection:AddButton("Join Discord", function()
+        local discordLink = "https://discord.gg/ryza"
+        SetClipboard(discordLink)
+        RYZA.CreateNotification("Discord", "Link copied to clipboard!", 3)
+    end)
+
+    return settingsTab
+end
+
+function RYZA.CreateWindow(options)
+    options = options or {}
+    
+    local title = options.Title or "RYZA Hub"
+
+    local defaultThemeName = options.DefaultTheme or "Electric Purple"
+    local defaultBackground = options.DefaultBackground or "None"
+    
+    local themeColor = RYZA.Themes[defaultThemeName] or RYZA.Themes["Electric Purple"]
+    local initialTransparency = options.Transparency or 75
+
+    local size = UDim2.fromOffset(520, 330) 
+    local position = options.Position or UDim2.new(0.5, -260, 0.5, -165)
+    local window = {}
+    setmetatable(window, RYZA)
+
+    window.CurrentThemeName = defaultThemeName
+    window.CurrentBackground = defaultBackground
+    window.DefaultTheme = defaultThemeName
+    window.CurrentThemeColor = themeColor
+    window.pages, window.activeTab = {}, nil
+    window.animatedGradients, window.staticThemeElements, window.themeableBackgrounds = {}, {}, {}
+    window.allDropdowns = {}
+    window.openedPopups = {} 
+    window.LocalizedElements = {}
+    window.isOpaque = false
+    window.defaultTransparency = 1 - (initialTransparency / 100) 
+    window.connections = {}
+    window.window = window
+    window.initialTransparencyValue = initialTransparency
+    window.CurrentLanguage = RYZA.CurrentLanguage
+
+    local mainFrameBaseColor = Color3.fromRGB(20, 20, 20)
+    window.ScreenGui = create("ScreenGui", { 
+        Name = "RYZA_ScreenGui", 
+        ResetOnSpawn = false, 
+        ZIndexBehavior = Enum.ZIndexBehavior.Sibling, 
+        DisplayOrder = 10000,
+        Enabled = true 
+    })
+    
+    local existingGui = GetGuiParent():FindFirstChild("RYZA_ScreenGui")
+    if existingGui then
+        existingGui:Destroy()
+    end
+    
+    window.MainFrame = create("Frame", { Name = "MainFrame", Size = size, Position = position, BackgroundColor3 = mainFrameBaseColor, BackgroundTransparency = window.defaultTransparency, BorderSizePixel = 0, Parent = window.ScreenGui, ClipsDescendants = true, Visible = true })
+    table.insert(window.themeableBackgrounds, {Object = window.MainFrame, BaseColor = mainFrameBaseColor})
+
+    create("UICorner", { CornerRadius = UDim.new(0, 16), Parent = window.MainFrame })
+    local mainStroke = create("UIStroke", { Color = Color3.new(1, 1, 1), Thickness = 6, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = window.MainFrame })
+    local outlineGradient = create("UIGradient", {
+        Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0.00, BORDER_COLOR), ColorSequenceKeypoint.new(0.30, BORDER_COLOR),
+            ColorSequenceKeypoint.new(0.50, window.CurrentThemeColor), ColorSequenceKeypoint.new(0.70, BORDER_COLOR),
+            ColorSequenceKeypoint.new(1.00, BORDER_COLOR)
+        }),
+        Rotation = 0, Parent = mainStroke
+    })
+    table.insert(window.animatedGradients, outlineGradient)
+
+    local titleBar = create("Frame", { Name = "TitleBar", Size = UDim2.new(1, 0, 0, 35), BackgroundTransparency = 1, Parent = window.MainFrame })
+    
+    local titleLbl = create("TextLabel", { Size = UDim2.new(1, -95, 1, 0), Position = UDim2.fromOffset(12, 0), BackgroundTransparency = 1, Font = Enum.Font.SourceSansBold, TextColor3 = Color3.fromRGB(255, 255, 255), TextSize = 16, TextXAlignment = Enum.TextXAlignment.Left, Parent = titleBar })
+    registerLocal(window, titleLbl, title)
+
+    local hideButton = create("TextButton", { Name = "HideButton", Size = UDim2.fromOffset(20, 20), Position = UDim2.new(1, -60, 0.5, -10), BackgroundTransparency = 1, Text = "", Parent = titleBar })
+    local line = create("Frame", { Name = "Line", Size = UDim2.new(0.7, 0, 0.1, 0), Position = UDim2.fromScale(0.5, 0.5), AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = Color3.fromRGB(225, 225, 225), BorderSizePixel = 0, Parent = hideButton })
+    create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = line })
+    local closeButton = create("TextButton", { Name = "CloseButton", Size = UDim2.fromOffset(20, 20), Position = UDim2.new(1, -35, 0.5, -10), BackgroundTransparency = 1, Text = "", Parent = titleBar })
+    local line1 = create("Frame", { Name = "Line1", Size = UDim2.new(0.7, 0, 0.1, 0), Position = UDim2.fromScale(0.5, 0.5), AnchorPoint = Vector2.new(0.5, 0.5), Rotation = 45, BackgroundColor3 = Color3.fromRGB(225, 225, 225), BorderSizePixel = 0, Parent = closeButton })
+    create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = line1 })
+    local line2 = create("Frame", { Name = "Line2", Size = UDim2.new(0.7, 0, 0.1, 0), Position = UDim2.fromScale(0.5, 0.5), AnchorPoint = Vector2.new(0.5, 0.5), Rotation = -45, BackgroundColor3 = Color3.fromRGB(225, 225, 225), BorderSizePixel = 0, Parent = closeButton })
+    create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = line2 })
+
+    window.TabContainer = create("ScrollingFrame", {
+        Name = "TabContainer", Size = UDim2.new(0, 110, 1, -50), Position = UDim2.fromOffset(5, 45),
+        BackgroundTransparency = 1, BorderSizePixel = 0, CanvasSize = UDim2.new(0,0,0,0),
+        ScrollBarThickness = 2,
+        ScrollBarImageTransparency = 0.5,
+        Parent = window.MainFrame,
+        ScrollingDirection = Enum.ScrollingDirection.Y
+    })
+    local tabListLayout = create("UIListLayout", { Parent = window.TabContainer, Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder, HorizontalAlignment = Enum.HorizontalAlignment.Left })
+    local tabPadding = create("UIPadding", { Parent = window.TabContainer, PaddingTop = UDim.new(0, 3), PaddingBottom = UDim.new(0, 10), PaddingLeft = UDim.new(0, 3), PaddingRight = UDim.new(0, 3) })
+    
+    tabListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        window.TabContainer.CanvasSize = UDim2.fromOffset(0, tabListLayout.AbsoluteContentSize.Y + tabPadding.PaddingTop.Offset + tabPadding.PaddingBottom.Offset)
+    end)
+
+    local contentBaseColor = Color3.fromRGB(30, 30, 30)
+    window.ContentContainer = create("ScrollingFrame", {
+        Name = "ContentContainer", 
+        Size = UDim2.new(1, -120, 1, -40), 
+        Position = UDim2.new(0, 115, 0, 35),
+        BackgroundColor3 = contentBaseColor, 
+        BackgroundTransparency = 0.6, 
+        BorderSizePixel = 0,
+        CanvasSize = UDim2.new(0, 0, 0, 0), 
+        ScrollBarImageColor3 = Color3.fromRGB(80, 80, 80),
+        ScrollBarThickness = 3,
+        ScrollBarImageTransparency = 0.5,
+        Parent = window.MainFrame,
+        ScrollingDirection = Enum.ScrollingDirection.Y
+    })
+    table.insert(window.themeableBackgrounds, {Object = window.ContentContainer, BaseColor = contentBaseColor})
+    
+    create("UIPadding", {Parent = window.ContentContainer, PaddingTop = UDim.new(0, 3), PaddingBottom = UDim.new(0, 8), PaddingLeft = UDim.new(0, 5), PaddingRight = UDim.new(0, 5)})
+    create("UICorner", { CornerRadius = UDim.new(0, 12), Parent = window.ContentContainer })
+    local contentStroke = create("UIStroke", { Color = Color3.new(1, 1, 1), Thickness = 2.5, Parent = window.ContentContainer })
+    local contentGradient = create("UIGradient", {
+        Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0.00, BORDER_COLOR), ColorSequenceKeypoint.new(0.30, BORDER_COLOR),
+            ColorSequenceKeypoint.new(0.50, window.CurrentThemeColor), ColorSequenceKeypoint.new(0.70, BORDER_COLOR),
+            ColorSequenceKeypoint.new(1.00, BORDER_COLOR)
+        }),
+        Rotation = 0, Parent = contentStroke
+    })
+    table.insert(window.animatedGradients, contentGradient)
+
+    local toggleButtonContainer = create("Frame", {
+        Name = "ToggleContainer", 
+        Size = UDim2.fromOffset(60, 60), 
+        Position = UDim2.new(0, 20, 0.5, 0),
+        AnchorPoint = Vector2.new(0, 0.5), 
+        BackgroundTransparency = 1, 
+        Parent = window.ScreenGui
+    })
+
+    local outlineFrame = create("Frame", { Name = "OutlineFrame", Size = UDim2.fromScale(1, 1), Position = UDim2.fromScale(0.5, 0.5), AnchorPoint = Vector2.new(0.5, 0.5), BackgroundTransparency = 1, Parent = toggleButtonContainer })
+    create("UICorner", {CornerRadius = UDim.new(0.5, 0), Parent = outlineFrame})
+    local outerStroke = create("UIStroke", { Color = Color3.new(1, 1, 1), Thickness = 4, Parent = outlineFrame })
+    local outerGradient = create("UIGradient", {
+        Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0.00, BORDER_COLOR), ColorSequenceKeypoint.new(0.30, BORDER_COLOR),
+            ColorSequenceKeypoint.new(0.50, window.CurrentThemeColor), ColorSequenceKeypoint.new(0.70, BORDER_COLOR),
+            ColorSequenceKeypoint.new(1.00, BORDER_COLOR)
+        }),
+        Rotation = 0, Parent = outerStroke
+    })
+    table.insert(window.animatedGradients, outerGradient)
+    
+    local toggleButton = create("ImageButton", {
+        Name = "ToggleUI", 
+        Size = UDim2.fromScale(1, 1), 
+        Position = UDim2.fromScale(0.5, 0.5), 
+        AnchorPoint = Vector2.new(0.5, 0.5), 
+        BackgroundColor3 = Color3.fromRGB(0,0,0), 
+        Image = "rbxassetid://135080202124876",
+        Active = false, 
+        Parent = outlineFrame
+    })
+    create("UICorner", {CornerRadius = UDim.new(0.5,0), Parent = toggleButton})
+    local innerStroke = create("UIStroke", { Color = Color3.new(1,1,1), Thickness = 2.5, Parent = toggleButton })
+    local innerGradient = create("UIGradient", {
+        Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0.00, BORDER_COLOR), ColorSequenceKeypoint.new(0.30, BORDER_COLOR),
+            ColorSequenceKeypoint.new(0.50, window.CurrentThemeColor), ColorSequenceKeypoint.new(0.70, BORDER_COLOR),
+            ColorSequenceKeypoint.new(1.00, BORDER_COLOR)
+        }),
+        Rotation = 0, Parent = innerStroke
+    })
+    table.insert(window.animatedGradients, innerGradient)
+
+    local isConfirmationVisible = false
+    local function showConfirmation()
+        if isConfirmationVisible then return end
+        isConfirmationVisible = true
+        local confirmOverlay = create("Frame", { Name = "ConfirmOverlay", Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = Color3.fromRGB(0, 0, 0), BackgroundTransparency = 0.5, Parent = window.MainFrame, ZIndex = 10 })
+        local confirmDialog = create("Frame", { Name = "ConfirmDialog", Size = UDim2.fromOffset(250, 100), Position = UDim2.fromScale(0.5, 0.5), AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = Color3.fromRGB(0, 0, 0), BackgroundTransparency = 0.6, Parent = confirmOverlay })
+        create("UICorner", { CornerRadius = UDim.new(0, 8), Parent = confirmDialog })
+        local confirmStroke = create("UIStroke", { Color = Color3.new(1, 1, 1), Thickness = 2, Parent = confirmDialog })
+        local confirmGradient = create("UIGradient", {
+            Color = ColorSequence.new({
+                ColorSequenceKeypoint.new(0.00, BORDER_COLOR), ColorSequenceKeypoint.new(0.30, BORDER_COLOR),
+                ColorSequenceKeypoint.new(0.50, window.CurrentThemeColor), ColorSequenceKeypoint.new(0.70, BORDER_COLOR),
+                ColorSequenceKeypoint.new(1.00, BORDER_COLOR)
+            }),
+            Rotation = 0, Parent = confirmStroke
+        })
+        table.insert(window.animatedGradients, confirmGradient)
+        
+        local confLbl = create("TextLabel", { Size = UDim2.new(1, 0, 0, 50), BackgroundTransparency = 1, Font = Enum.Font.SourceSansBold, TextColor3 = Color3.fromRGB(255, 255, 255), TextSize = 18, Parent = confirmDialog })
+        registerLocal(window, confLbl, "Are you sure?")
+
+        local yesButton = create("TextButton", { Size = UDim2.fromOffset(100, 30), Position = UDim2.new(0.25, 0, 1, -40), AnchorPoint = Vector2.new(0.5, 0), BackgroundColor3 = Color3.fromRGB(190, 40, 40), Font = Enum.Font.SourceSansBold, TextColor3 = Color3.fromRGB(255, 255, 255), TextSize = 14, Parent = confirmDialog })
+        registerLocal(window, yesButton, "Yes")
+        create("UICorner", { CornerRadius = UDim.new(0.5, 0), Parent = yesButton })
+
+        local noButton = create("TextButton", { Size = UDim2.fromOffset(100, 30), Position = UDim2.new(0.75, 0, 1, -40), AnchorPoint = Vector2.new(0.5, 0), BackgroundColor3 = Color3.fromRGB(60, 60, 65), Font = Enum.Font.SourceSansBold, TextColor3 = Color3.fromRGB(255, 255, 255), TextSize = 14, Parent = confirmDialog })
+        registerLocal(window, noButton, "No")
+        create("UICorner", { CornerRadius = UDim.new(0.5, 0), Parent = noButton })
+
+        yesButton.MouseButton1Click:Connect(function() window.ScreenGui:Destroy() end)
+        noButton.MouseButton1Click:Connect(function() isConfirmationVisible = false; for i, v in ipairs(window.animatedGradients) do if v == confirmGradient then table.remove(window.animatedGradients, i); break end end; confirmOverlay:Destroy() end)
+    end
+    closeButton.MouseButton1Click:Connect(showConfirmation)
+    
+    local modalButton = create("TextButton", {
+        Name = "ModalControl",
+        Parent = window.MainFrame,
+        Modal = true,
+        BackgroundTransparency = 1,
+        Size = UDim2.new(0, 0, 0, 0),
+        Text = ""
+    })
+
+    local function toggleVisibility() 
+        window.MainFrame.Visible = not window.MainFrame.Visible
+        modalButton.Modal = window.MainFrame.Visible
+        if not window.MainFrame.Visible then 
+            if window.openedPopups then
+                for _, popup in ipairs(window.openedPopups) do 
+                    popup.close() 
+                end 
+            end
+            for _, dropdown in ipairs(window.allDropdowns) do 
+                dropdown.close() 
+            end 
+        end 
+    end 
+    hideButton.MouseButton1Click:Connect(toggleVisibility)
+
+    titleBar.InputBegan:Connect(function(input, gpe)
+        if gpe or isConfirmationVisible then return end
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            local dragStart = input.Position; local startPosition = window.MainFrame.Position
+            local inputChangedConnection, inputEndedConnection
+            inputChangedConnection = UserInputService.InputChanged:Connect(function(inputObject)
+                if inputObject.UserInputType == Enum.UserInputType.MouseMovement or inputObject.UserInputType == Enum.UserInputType.Touch then
+                    local delta = inputObject.Position - dragStart; window.MainFrame.Position = UDim2.new(startPosition.X.Scale, startPosition.X.Offset + delta.X, startPosition.Y.Scale, startPosition.Y.Offset + delta.Y)
+                end
+            end)
+            inputEndedConnection = UserInputService.InputEnded:Connect(function(inputObject)
+                if inputObject.UserInputType == Enum.UserInputType.MouseButton1 or inputObject.UserInputType == Enum.UserInputType.Touch then inputChangedConnection:Disconnect(); inputEndedConnection:Disconnect() end
+            end)
+        end
+    end)
+
+    local isDragging, dragStartMousePos, buttonStartPosUDim = false, nil, nil; local clickThreshold = 5
+    
+    toggleButton.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then isDragging = true; dragStartMousePos = input.Position; buttonStartPosUDim = toggleButtonContainer.Position end end)
+    toggleButton.InputChanged:Connect(function(input) if isDragging and buttonStartPosUDim and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then local delta = input.Position - dragStartMousePos; toggleButtonContainer.Position = UDim2.new(buttonStartPosUDim.X.Scale, buttonStartPosUDim.X.Offset + delta.X, buttonStartPosUDim.Y.Scale, buttonStartPosUDim.Y.Offset + delta.Y) end end)
+    toggleButton.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then local wasSignificantDrag = false; if isDragging and dragStartMousePos and (input.Position - dragStartMousePos).Magnitude >= clickThreshold then wasSignificantDrag = true end; isDragging = false; dragStartMousePos = nil; buttonStartPosUDim = nil; if not wasSignificantDrag then toggleVisibility() end end end)
+
+    window.connections.Toggle = UserInputService.InputBegan:Connect(function(input, gpe) if not gpe and input.KeyCode == TOGGLE_KEY then toggleVisibility() end end)
+    window.connections.Animation = RunService.Heartbeat:Connect(function() local rotation = (tick() * ROTATION_SPEED) % 360; for i = #window.animatedGradients, 1, -1 do local gradient = window.animatedGradients[i]; if gradient and gradient.Parent then gradient.Rotation = rotation else table.remove(window.animatedGradients, i) end end end)
+    window.ScreenGui.Destroying:Connect(function() for _, c in pairs(window.connections) do c:Disconnect() end end)
+    window.ScreenGui.Parent = GetGuiParent()
+    
+    if defaultBackground ~= "None" then
+        window:SetBackground(defaultBackground)
+    end
+    
+    return window
+end
+
+function RYZA:CreateChatLogs(options)
+    options = options or {}
+    local tabName = options.TabName or "Chat Logs"
+    
+    local chatTab = self:AddTab(tabName)
+    
+    local logContainer = create("ScrollingFrame", {
+        Name = "LogContainer",
+        Size = UDim2.new(1, 0, 1, -10),
+        BackgroundTransparency = 1,
+        ScrollBarThickness = 2,
+        ScrollBarImageTransparency = 0.5,
+        ScrollBarImageColor3 = self.CurrentThemeColor, 
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        Parent = chatTab.page
+    })
+    
+    table.insert(self.staticThemeElements, {Object = logContainer, Property = "ScrollBarImageColor3"})
+
+    create("UIListLayout", {
+        Parent = logContainer,
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 5)
+    })
+    
+    create("UIPadding", {
+        Parent = logContainer,
+        PaddingLeft = UDim.new(0, 5),
+        PaddingRight = UDim.new(0, 5),
+        PaddingTop = UDim.new(0, 5),
+        PaddingBottom = UDim.new(0, 5)
+    })
+
+    local function ToHex(color)
+        return string.format("#%02X%02X%02X", color.R * 255, color.G * 255, color.B * 255)
+    end
+
+    local function AddLogEntry(playerObj, message)
+        local teamPrefix = ""
+        local playerName = playerObj.Name
+        
+        if playerObj and playerObj.Team then
+            local teamColorHex = ToHex(playerObj.Team.TeamColor.Color)
+            teamPrefix = string.format('<font color="%s">[%s]</font> ', teamColorHex, playerObj.Team.Name)
+        end
+
+        local formattedText = string.format("%s<font color='#FFFFFF'><b>%s:</b></font> %s", teamPrefix, playerName, message)
+
+        create("TextLabel", {
+            Name = "LogEntry",
+            Size = UDim2.new(1, 0, 0, 0),
+            AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundTransparency = 1,
+            Text = formattedText,
+            TextColor3 = Color3.fromRGB(200, 200, 200),
+            TextSize = 14,
+            Font = Enum.Font.SourceSansBold,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextWrapped = true,
+            RichText = true,
+            Parent = logContainer,
+            LayoutOrder = tick()
+        })
+
+        local children = logContainer:GetChildren()
+        if #children > 100 then
+            for i, child in ipairs(children) do
+                if child:IsA("TextLabel") then
+                    child:Destroy()
+                    if #logContainer:GetChildren() <= 100 then break end
+                end
+            end
+        end
+
+        logContainer.CanvasPosition = Vector2.new(0, 99999)
+    end
+
+    if TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
+        TextChatService.MessageReceived:Connect(function(textChatMessage)
+            if textChatMessage.TextSource then
+                local player = Players:GetPlayerByUserId(textChatMessage.TextSource.UserId)
+                if player then
+                    AddLogEntry(player, textChatMessage.Text)
+                end
+            end
+        end)
+    else
+        local function ConnectPlayer(p)
+            p.Chatted:Connect(function(msg)
+                AddLogEntry(p, msg)
+            end)
+        end
+        for _, p in pairs(Players:GetPlayers()) do ConnectPlayer(p) end
+        Players.PlayerAdded:Connect(ConnectPlayer)
+    end
+
+    return chatTab
+end
+
+function RYZA:CreateKeySystem(options)
+    options = options or {}
+    
+    local discordLink = options.Link or ""
+    local onSuccess = options.OnSuccess or function() end
+    
+    local validKeys = options.Keys 
+    local rawUrl = options.RawURL 
+    local customVerify = options.CustomVerify 
+    
+    local scriptId = options.ScriptID
+    local apiKey = options.ApiKey
+    
+    -- Dynamically read the API module URL from script options (No hardcoding)
+    local apiModuleUrl = options.ApiModuleUrl
+    assert(apiModuleUrl, "RYZA Error: ApiModuleUrl is required in CreateKeySystem options!")
+    
+    local keyWindowGui = create("ScreenGui", { 
+        Name = "RYZA_KeySystem", 
+        ResetOnSpawn = false, 
+        ZIndexBehavior = Enum.ZIndexBehavior.Global, 
+        DisplayOrder = 10001,
+        Parent = GetGuiParent()
+    })
+    
+    local mainFrame = create("Frame", { 
+        Name = "MainFrame", 
+        Parent = keyWindowGui,
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0.5, 0, 0.5, 0),
+        Size = UDim2.new(0, 400, 0, 290),
+        BackgroundColor3 = Color3.fromRGB(15, 15, 20),
+        BackgroundTransparency = 0.2,
+        BorderSizePixel = 0, 
+        ClipsDescendants = true,
+        Active = true
+    })
+    create("UICorner", { CornerRadius = UDim.new(0, 16), Parent = mainFrame })
+    
+    local backgroundImage = create("ImageLabel", {
+        Name = "BackgroundImage",
+        Parent = mainFrame,
+        Size = UDim2.new(1, 0, 1, 0),
+        Position = UDim2.new(0, 0, 0, 0),
+        BackgroundTransparency = 1,
+        Image = "rbxassetid://126311787910362",
+        ImageTransparency = 0.2,
+        ScaleType = Enum.ScaleType.Crop,
+        ZIndex = 0
+    })
+    create("UICorner", { CornerRadius = UDim.new(0, 16), Parent = backgroundImage })
+    
+    local mainStroke = create("UIStroke", { 
+        Color = Color3.new(1, 1, 1), 
+        Thickness = 3.5, 
+        Parent = mainFrame 
+    })
+    
+    local mainGradient = create("UIGradient", {
+        Parent = mainStroke,
+        Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0.00, Color3.fromRGB(20, 15, 30)),
+            ColorSequenceKeypoint.new(0.30, Color3.fromRGB(20, 15, 30)),
+            ColorSequenceKeypoint.new(0.50, Color3.fromRGB(160, 50, 240)),
+            ColorSequenceKeypoint.new(0.70, Color3.fromRGB(20, 15, 30)),
+            ColorSequenceKeypoint.new(1.00, Color3.fromRGB(20, 15, 30))
+        }),
+        Rotation = 0
+    })
+
+    local keyAnimationConn
+    keyAnimationConn = RunService.RenderStepped:Connect(function(dt)
+        if mainGradient and mainGradient.Parent then
+            mainGradient.Rotation = (mainGradient.Rotation + 90 * dt) % 360
+        else
+            keyAnimationConn:Disconnect()
+        end
+    end)
+    
+    mainFrame.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            local dragStart = input.Position
+            local startPos = mainFrame.Position
+            local inputChangedConnection, inputEndedConnection
+            inputChangedConnection = UserInputService.InputChanged:Connect(function(inputObject)
+                if inputObject.UserInputType == Enum.UserInputType.MouseMovement or inputObject.UserInputType == Enum.UserInputType.Touch then
+                    local delta = inputObject.Position - dragStart
+                    mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+                end
+            end)
+            inputEndedConnection = UserInputService.InputEnded:Connect(function(inputObject)
+                if inputObject.UserInputType == Enum.UserInputType.MouseButton1 or inputObject.UserInputType == Enum.UserInputType.Touch then
+                    if inputChangedConnection then inputChangedConnection:Disconnect() end
+                    if inputEndedConnection then inputEndedConnection:Disconnect() end
+                end
+            end)
+        end
+    end)
+    
+    local closeBtn = create("TextButton", {
+        Name = "CloseButton",
+        Parent = mainFrame,
+        Size = UDim2.new(0, 24, 0, 24),
+        Position = UDim2.new(1, -34, 0, 10),
+        BackgroundTransparency = 1,
+        Text = "X",
+        TextColor3 = Color3.fromRGB(255, 255, 255),
+        Font = Enum.Font.GothamBold,
+        TextSize = 17,
+        ZIndex = 2,
+        AutoButtonColor = false
+    })
+    closeBtn.MouseEnter:Connect(function() closeBtn.TextColor3 = Color3.fromRGB(255, 100, 100) end)
+    closeBtn.MouseLeave:Connect(function() closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255) end)
+    closeBtn.MouseButton1Click:Connect(function() keyWindowGui:Destroy() end)
+    
+    create("TextLabel", { 
+        Name = "Title", Parent = mainFrame, Size = UDim2.new(1, -60, 0, 24), Position = UDim2.new(0, 24, 0, 20),
+        BackgroundTransparency = 1, Text = "● RYZA ●", TextColor3 = Color3.fromRGB(255, 255, 255),
+        Font = Enum.Font.GothamBold, TextSize = 16, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 2
+    })
+    
+    create("TextLabel", {
+        Name = "Subtitle", Parent = mainFrame, Size = UDim2.new(1, -60, 0, 16), Position = UDim2.new(0, 24, 0, 46),
+        BackgroundTransparency = 1, Text = "Ryza keySystem", TextColor3 = Color3.fromRGB(150, 150, 165),
+        Font = Enum.Font.GothamBold, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 2
+    })
+
+    create("TextLabel", {
+        Name = "SupportedLabel",
+        Parent = mainFrame,
+        Size = UDim2.new(1, 0, 0, 15),
+        Position = UDim2.new(0, 0, 1, -18),
+        BackgroundTransparency = 1,
+        Text = "Supported by Ryza.lol",
+        TextColor3 = Color3.fromRGB(130, 130, 145),
+        Font = Enum.Font.GothamBold,
+        TextSize = 11,
+        TextXAlignment = Enum.TextXAlignment.Center,
+        ZIndex = 2
+    })
+    
+    local inputFrame = create("Frame", {
+        Name = "InputFrame", Parent = mainFrame, Size = UDim2.new(1, -48, 0, 46), Position = UDim2.new(0, 24, 0, 85),
+        BackgroundColor3 = Color3.fromRGB(25, 25, 35), BackgroundTransparency = 0.3, BorderSizePixel = 0, ZIndex = 2
+    })
+    create("UICorner", { CornerRadius = UDim.new(0, 23), Parent = inputFrame })
+    create("UIStroke", { Color = Color3.fromRGB(55, 55, 75), Thickness = 1, Parent = inputFrame })
+    
+    local keyInput = create("TextBox", {
+        Name = "KeyInput", Parent = inputFrame, Size = UDim2.new(1, -30, 1, 0), Position = UDim2.new(0, 16, 0, 0),
+        BackgroundTransparency = 1, Text = "", PlaceholderText = "Enter Key here..",
+        TextColor3 = Color3.fromRGB(255, 255, 255), PlaceholderColor3 = Color3.fromRGB(120, 120, 135),
+        Font = Enum.Font.GothamBold, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left, ClearTextOnFocus = false, ZIndex = 3
+    })
+    
+    local statusLabel = create("TextLabel", {
+        Name = "StatusLabel", Parent = mainFrame, Size = UDim2.new(0.5, -12, 0, 18), Position = UDim2.new(0.5, 20, 0, 137),
+        BackgroundTransparency = 1, Text = "Waiting for key", TextColor3 = Color3.fromRGB(160, 160, 175),
+        Font = Enum.Font.GothamBold, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Center, ZIndex = 2
+    })
+
+    local function SetStatus(text, color)
+        TweenService:Create(statusLabel, TweenInfo.new(0.2), {TextTransparency = 1}):Play()
+        task.wait(0.2)
+        statusLabel.Text = text
+        statusLabel.TextColor3 = color or Color3.fromRGB(160, 160, 175)
+        TweenService:Create(statusLabel, TweenInfo.new(0.2), {TextTransparency = 0}):Play()
+    end
+    
+    local buttonsContainer = create("Frame", {
+        Name = "ButtonsContainer", Parent = mainFrame, Size = UDim2.new(1, -48, 0, 44), Position = UDim2.new(0, 24, 0, 180),
+        BackgroundTransparency = 1, ZIndex = 2
+    })
+    create("UIListLayout", {
+        Parent = buttonsContainer, FillDirection = Enum.FillDirection.Horizontal,
+        HorizontalAlignment = Enum.HorizontalAlignment.Center, VerticalAlignment = Enum.VerticalAlignment.Center, Padding = UDim.new(0, 12)
+    })
+    
+    local getKeyBtn = create("TextButton", {
+        Name = "GetKeyButton", Parent = buttonsContainer, Size = UDim2.new(0.5, -6, 1, 0),
+        BackgroundColor3 = Color3.fromRGB(45, 45, 55), BackgroundTransparency = 0.1, Text = "", ZIndex = 3, AutoButtonColor = true
+    })
+    create("UICorner", { CornerRadius = UDim.new(0, 22), Parent = getKeyBtn })
+    create("UIGradient", {
+        Parent = getKeyBtn, Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0.0, Color3.fromRGB(30, 30, 40)), ColorSequenceKeypoint.new(0.3, Color3.fromRGB(55, 55, 65)),
+            ColorSequenceKeypoint.new(0.7, Color3.fromRGB(55, 55, 65)), ColorSequenceKeypoint.new(1.0, Color3.fromRGB(30, 30, 40))
+        }), Rotation = 0
+    })
+    create("TextLabel", {
+        Name = "ButtonText", Parent = getKeyBtn, Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1,
+        Text = "🔑  Get Key", TextColor3 = Color3.fromRGB(255, 255, 255), Font = Enum.Font.GothamBold, TextSize = 13, ZIndex = 4
+    })
+    
+    local verifyBtn = create("TextButton", {
+        Name = "VerifyKeyButton", Parent = buttonsContainer, Size = UDim2.new(0.5, -6, 1, 0),
+        BackgroundColor3 = Color3.fromRGB(42, 150, 48), BackgroundTransparency = 0.1, Text = "", ZIndex = 3, AutoButtonColor = true
+    })
+    create("UICorner", { CornerRadius = UDim.new(0, 22), Parent = verifyBtn })
+    create("UIGradient", {
+        Parent = verifyBtn, Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0.0, Color3.fromRGB(20, 75, 25)), ColorSequenceKeypoint.new(0.2, Color3.fromRGB(48, 175, 55)),
+            ColorSequenceKeypoint.new(0.8, Color3.fromRGB(48, 175, 55)), ColorSequenceKeypoint.new(1.0, Color3.fromRGB(20, 75, 25))
+        }), Rotation = 0
+    })
+    create("TextLabel", {
+        Name = "ButtonText", Parent = verifyBtn, Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1,
+        Text = "✔️ Verify Key", TextColor3 = Color3.fromRGB(255, 255, 255), Font = Enum.Font.GothamBold, TextSize = 13, ZIndex = 4
+    })
+    
+    getKeyBtn.MouseButton1Click:Connect(function()
+        local function copyToClipboard(str)
+            if setclipboard then setclipboard(str)
+            elseif toclipboard then toclipboard(str) end
+        end
+        pcall(copyToClipboard, discordLink)
+        SetStatus("Link copied!", Color3.fromRGB(130, 160, 255))
+        task.delay(2, function()
+            if statusLabel.Text == "Link copied!" then SetStatus("Waiting for key", Color3.fromRGB(160, 160, 175)) end
+        end)
+    end)
+    
+    local isChecking = false
+    verifyBtn.MouseButton1Click:Connect(function()
+        if isChecking then return end
+        isChecking = true
+        
+        local enteredKey = keyInput.Text
+        if enteredKey == "" then
+            SetStatus("Please enter a key", Color3.fromRGB(255, 80, 80))
+            task.delay(2, function()
+                if statusLabel.Text == "Please enter a key" then SetStatus("Waiting for key", Color3.fromRGB(160, 160, 175)) end
+            end)
+            isChecking = false
+            return
+        end
+
+        SetStatus("Checking key...", Color3.fromRGB(200, 200, 215))
+
+        local isValid = false
+        local validationError = "Key is wrong"
+
+        if scriptId and scriptId ~= "" then
+            local modSuccess, module = pcall(function()
+                return loadstring(game:HttpGet(apiModuleUrl))()
+            end)
+            
+            if modSuccess and module and module.new then
+                local api = module.new(scriptId, apiKey)
+                
+                local success, result = pcall(function()
+                    return api:validate(enteredKey)
+                end)
+                
+                if success then
+                    isValid = result 
+                    if not isValid then
+                        validationError = tostring(result) 
+                    end
+                else
+                    isValid = false
+                    validationError = "Validation request failed"
+                end
+            else
+                isValid = false
+                validationError = "Failed to load API module"
+            end
+
+        elseif type(customVerify) == "function" then
+            isValid = customVerify(enteredKey)
+            
+        elseif type(rawUrl) == "string" and rawUrl ~= "" then
+            local requestFunc = syn and syn.request or http and http.request or http_request or fluxus and fluxus.request or getgenv().request or request
+            if requestFunc then
+                local success, res = pcall(function()
+                    return requestFunc({Url = rawUrl, Method = "GET"})
+                end)
+                if success and res and res.Body then
+                    for line in string.gmatch(res.Body, "[^\r\n]+") do
+                        if line == enteredKey then
+                            isValid = true
+                            break
+                        end
+                    end
+                else
+                    isValid = false
+                    validationError = "Failed to fetch keys"
+                end
+            else
+                isValid = false
+                validationError = "Executor doesn't support HTTP"
+            end
+            
+        elseif type(validKeys) == "table" then
+            for _, key in ipairs(validKeys) do
+                if key == enteredKey then
+                    isValid = true
+                    break
+                end
+            end
+        else
+            isValid = false
+            validationError = "No verification method set"
+        end
+
+        if isValid then
+            SetStatus("Key successful", Color3.fromRGB(80, 230, 100))
+            task.wait(1)
+            
+            TweenService:Create(mainFrame, TweenInfo.new(0.4), {BackgroundTransparency = 1}):Play()
+            TweenService:Create(mainStroke, TweenInfo.new(0.4), {Transparency = 1}):Play()
+            TweenService:Create(backgroundImage, TweenInfo.new(0.4), {ImageTransparency = 1}):Play()
+            task.wait(0.4)
+            keyWindowGui:Destroy()
+            if onSuccess then onSuccess() end
+        else
+            SetStatus(validationError, Color3.fromRGB(255, 80, 80))
+            task.wait(2)
+            SetStatus("Waiting for key", Color3.fromRGB(160, 160, 175))
+            isChecking = false
+        end
+    end)
+end
+
+function RYZA.Init()
+    InitializeNotificationUI()
+end
+
+RYZA.Init()
+
+return RYZA
